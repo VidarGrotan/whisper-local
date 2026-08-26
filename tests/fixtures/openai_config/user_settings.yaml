@@ -1,0 +1,12 @@
+postprocess:
+  openai_compatible:
+    enabled: true
+    endpoint: https://llm.hpc.ntnu.no/v1
+    api_key_env: NTNU_LLM_API_KEY
+    routes:
+      en:
+        model: moonshotai/Kimi-K2.6-instant
+        prompt: Polish English. {text}
+      no:
+        model: NbAiLab/borealis-27b
+        prompt: Polish Norwegian. {text}

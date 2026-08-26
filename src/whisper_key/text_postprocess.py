@@ -2,13 +2,14 @@
 # The text-shaping stage between Whisper and delivery. Runs an ordered pipeline
 # over the raw transcript: spoken editing commands ("scratch that") → inline
 # voice formatting (say "comma") → deterministic smart formatting (times/emails/
-# URLs) → user corrections → filler/casing/punctuation tidying → optional Ollama
+# URLs) → user corrections → filler/casing/punctuation tidying → optional LLM
 # polish. Every stage is opt-in via the `postprocess` config section and pure
-# except the final Ollama call, so output stays predictable and fully offline.
+# except the final provider call; provider failures preserve the local transcript.
 
 import functools
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.request
@@ -91,6 +92,27 @@ def postprocess(text: str, config: dict) -> str:
     ollama_cfg = config.get('ollama')
     if isinstance(ollama_cfg, dict) and ollama_cfg.get('enabled', False):
         polished = _ollama_polish(text, ollama_cfg)
+        if polished:
+            text = polished
+
+    openai_cfg = config.get('openai_compatible')
+    if isinstance(openai_cfg, dict) and openai_cfg.get('enabled', False):
+        detected = str(config.get('detected_language') or '').lower().split('-')[0]
+        routes = openai_cfg.get('routes')
+        if isinstance(routes, dict) and routes:
+            route = routes.get(detected)
+            if not isinstance(route, dict):
+                logger.debug("No OpenAI-compatible route for language %s", detected or 'unknown')
+                return text
+            openai_cfg = {**openai_cfg, **route}
+        else:
+            only_languages = openai_cfg.get('only_languages')
+            if isinstance(only_languages, (list, tuple)) and only_languages:
+                allowed = {str(language).lower().split('-')[0] for language in only_languages}
+                if not detected or detected not in allowed:
+                    logger.debug("Skipping OpenAI-compatible polish for language %s", detected or 'unknown')
+                    return text
+        polished = _openai_compatible_polish(text, openai_cfg)
         if polished:
             text = polished
 
@@ -437,4 +459,57 @@ def _ollama_polish(text: str, cfg: dict) -> str:
             return polished
     except (urllib.error.URLError, OSError, ValueError) as e:
         logger.warning(f"Ollama post-edit unavailable ({e}); using raw transcript")
+    return ''
+
+
+# Send text-only cleanup requests to an OpenAI-compatible Chat Completions API.
+def _openai_compatible_polish(text: str, cfg: dict) -> str:
+    endpoint = cfg.get('endpoint', '').rstrip('/')
+    model = cfg.get('model', '')
+    api_key_env = cfg.get('api_key_env', '')
+    api_key = os.environ.get(api_key_env, '') if api_key_env else ''
+    try:
+        timeout = float(cfg.get('timeout', 15))
+    except (TypeError, ValueError):
+        logger.warning("OpenAI-compatible post-edit has an invalid timeout; using raw transcript")
+        return ''
+    prompt_template = cfg.get(
+        'prompt',
+        'Polish this dictation without changing its meaning. Return only the corrected text.\n\n{text}',
+    )
+
+    if not endpoint or not model or not api_key:
+        logger.warning("OpenAI-compatible post-edit is not fully configured; using raw transcript")
+        return ''
+
+    system_prompt = prompt_template.replace('{text}', '').rstrip()
+    if not system_prompt:
+        system_prompt = 'Return only the corrected transcription.'
+
+    payload = {
+        'model': model,
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': text},
+        ],
+        'temperature': 0,
+    }
+
+    try:
+        req = urllib.request.Request(
+            f"{endpoint}/chat/completions",
+            data=json.dumps(payload).encode('utf-8'),
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        polished = data['choices'][0]['message']['content'].strip()
+        if polished:
+            logger.debug("OpenAI-compatible polish applied")
+            return polished
+    except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as e:
+        logger.warning(f"OpenAI-compatible post-edit unavailable ({e}); using raw transcript")
     return ''

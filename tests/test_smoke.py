@@ -242,6 +242,199 @@ class TextPostprocessTests(unittest.TestCase):
         result = _ollama_polish("hi", cfg)
         self.assertEqual(result, '')
 
+    def test_openai_compatible_polish_uses_env_key_and_returns_content(self):
+        # Break caught: a provider that sends the wrong endpoint/auth/payload or
+        # parses the Chat Completions response incorrectly cannot clean text.
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        captured = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    'choices': [{'message': {'content': 'Jeg kommer ikke i dag.'}}],
+                    'usage': {'prompt_tokens': 31, 'completion_tokens': 8},
+                }).encode('utf-8')
+
+        def fake_urlopen(request, timeout):
+            captured['request'] = request
+            captured['timeout'] = timeout
+            return Response()
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1/',
+            'model': 'NbAiLab/borealis-27b',
+            'api_key_env': 'TEST_NTNU_KEY',
+            'timeout': 12,
+            'prompt': 'Normalize to Bokmål. Return only text.\n\n{text}',
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            result = postprocess('Æ kjæm itj i dag.', cfg)
+
+        self.assertEqual(result, 'Jeg kommer ikke i dag.')
+        self.assertEqual(captured['request'].full_url,
+                         'https://llm.example.test/v1/chat/completions')
+        self.assertEqual(captured['request'].get_header('Authorization'),
+                         'Bearer secret-value')
+        payload = json.loads(captured['request'].data)
+        self.assertEqual(payload, {
+            'model': 'NbAiLab/borealis-27b',
+            'messages': [
+                {'role': 'system', 'content': 'Normalize to Bokmål. Return only text.'},
+                {'role': 'user', 'content': 'Æ kjæm itj i dag.'},
+            ],
+            'temperature': 0,
+        })
+        self.assertEqual(captured['timeout'], 12)
+
+    def test_openai_compatible_bad_timeout_preserves_raw_transcript(self):
+        # Break caught: a malformed YAML timeout must not discard an otherwise
+        # successful local Whisper transcription.
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'NbAiLab/borealis-27b',
+            'api_key_env': 'TEST_NTNU_KEY',
+            'timeout': 'not-a-number',
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False):
+            try:
+                result = postprocess('Æ kjæm itj i dag.', cfg)
+            except Exception as exc:
+                self.fail(f'post-processing raised instead of preserving raw text: {exc}')
+
+        self.assertEqual(result, 'Æ kjæm itj i dag.')
+
+    def test_openai_compatible_skips_language_outside_allowlist(self):
+        # Break caught: Borealis translates English into Norwegian even when the
+        # prompt says not to. Language routing must prevent the request entirely.
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        cfg = {
+            'detected_language': 'en',
+            'openai_compatible': {
+                'enabled': True,
+                'endpoint': 'https://llm.example.test/v1',
+                'model': 'NbAiLab/borealis-27b',
+                'api_key_env': 'TEST_NTNU_KEY',
+                'only_languages': ['no'],
+            },
+        }
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen') as urlopen:
+            result = postprocess('This must stay in English.', cfg)
+
+        self.assertEqual(result, 'This must stay in English.')
+        urlopen.assert_not_called()
+
+    def test_openai_compatible_routes_language_to_model_and_prompt(self):
+        # Break caught: both languages accidentally use the same model/prompt,
+        # causing Borealis to translate English instead of polishing it.
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        payloads = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                model = payloads[-1]['model']
+                content = 'Polished English.' if model == 'english-model' else 'Polert norsk.'
+                return json.dumps({'choices': [{'message': {'content': content}}]}).encode('utf-8')
+
+        def fake_urlopen(request, timeout):
+            payloads.append(json.loads(request.data))
+            return Response()
+
+        provider = {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'api_key_env': 'TEST_NTNU_KEY',
+            'routes': {
+                'en': {'model': 'english-model', 'prompt': 'Polish English.\n\n{text}'},
+                'no': {'model': 'norwegian-model', 'prompt': 'Polish Norwegian.\n\n{text}'},
+            },
+        }
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            english = postprocess('English input.', {
+                'detected_language': 'en', 'openai_compatible': provider})
+            norwegian = postprocess('Norsk tekst.', {
+                'detected_language': 'no', 'openai_compatible': provider})
+
+        self.assertEqual(english, 'Polished English.')
+        self.assertEqual(norwegian, 'Polert norsk.')
+        self.assertEqual([payload['model'] for payload in payloads],
+                         ['english-model', 'norwegian-model'])
+        self.assertEqual(payloads[0]['messages'][0]['content'], 'Polish English.')
+        self.assertEqual(payloads[1]['messages'][0]['content'], 'Polish Norwegian.')
+
+    def test_openai_compatible_route_preserves_unconfigured_language(self):
+        # Break caught: an unknown language is sent to a default model instead of
+        # preserving the local transcript when no explicit route exists.
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        cfg = {
+            'detected_language': 'de',
+            'openai_compatible': {
+                'enabled': True,
+                'endpoint': 'https://llm.example.test/v1',
+                'model': 'unsafe-default-model',
+                'api_key_env': 'TEST_NTNU_KEY',
+                'routes': {'en': {'model': 'english-model'}},
+            },
+        }
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen') as urlopen:
+            result = postprocess('Das bleibt lokal.', cfg)
+
+        self.assertEqual(result, 'Das bleibt lokal.')
+        urlopen.assert_not_called()
+
+    def test_config_manager_keeps_openai_compatible_provider_settings(self):
+        # Break caught: unknown nested settings are pruned during config load, so
+        # the provider must be part of the shipped schema to remain enabled.
+        from unittest import mock
+        from whisper_key.config_manager import ConfigManager
+
+        directory = ROOT / 'tests' / 'fixtures' / 'openai_config'
+        defaults = ROOT / 'src' / 'whisper_key' / 'config.defaults.yaml'
+        with mock.patch('whisper_key.config_manager.get_user_app_data_path',
+                        return_value=str(directory)):
+            config = ConfigManager(config_path=str(defaults), quiet=True)
+
+        postprocess_config = config.get_postprocess_config()
+        self.assertIn('openai_compatible', postprocess_config)
+        provider = postprocess_config['openai_compatible']
+        self.assertTrue(provider['enabled'])
+        self.assertEqual(provider['endpoint'], 'https://llm.hpc.ntnu.no/v1')
+        self.assertEqual(provider['api_key_env'], 'NTNU_LLM_API_KEY')
+        self.assertEqual(provider['routes']['en']['model'],
+                         'moonshotai/Kimi-K2.6-instant')
+        self.assertEqual(provider['routes']['no']['model'],
+                         'NbAiLab/borealis-27b')
+
     # --- Post-transcription replacements (correction-learning backing store) ---
     def test_replacement_literal_whole_word(self):
         from whisper_key.text_postprocess import postprocess

@@ -534,6 +534,22 @@ postprocess: # Transcription post-processing pipeline
 
             {text}
 
+    # Optional text-only cleanup via an OpenAI-compatible Chat Completions API.
+    # The API key is read from the named environment variable and never YAML.
+    openai_compatible:
+        enabled: false
+        endpoint: ""
+        model: ""
+        api_key_env: ""
+        timeout: 15
+        only_languages: []
+        routes: {}
+        prompt: |-
+            Correct this speech-to-text transcription without changing its meaning.
+            Return only the corrected transcription.
+
+            {text}
+
 update_check: # Opt-in update notifications
     # When enabled, once per day Whisper Local checks the GitHub releases API
     # for a newer version and shows a tray notification if found.

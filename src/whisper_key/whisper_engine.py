@@ -59,6 +59,7 @@ class WhisperEngine:
         self.hotwords = ", ".join(hotwords) if hotwords else None
         self.task = task if task in ('transcribe', 'translate') else 'transcribe'
         self.model = None
+        self.last_detected_language = None
         self.logger = logging.getLogger(__name__)
         self.registry = model_registry
         self.log_transcriptions = log_transcriptions
@@ -239,6 +240,7 @@ class WhisperEngine:
             # Log some info about what we transcribed
             detected_language = info.language
             confidence = info.language_probability
+            self.last_detected_language = detected_language
             self.logger.info(f"Transcription complete. Language: {detected_language} (confidence: {confidence:.2f}) - Time: {transcription_time:.2f}s")
             if self.log_transcriptions:
                 self.logger.info(f"Transcribed text: '{transcribed_text}'")
@@ -265,6 +267,5 @@ class WhisperEngine:
             if progress_callback:
                 progress_callback("Model already loaded")
             return
-        
+
         self._load_model_async(new_model_key, progress_callback)
-    

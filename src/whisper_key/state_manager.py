@@ -522,6 +522,9 @@ class StateManager:
             # in addition to the delivery behaviour handled further down.
             rule = self.app_rules.match_for_foreground()
             postprocess_cfg = self.config_manager.get_postprocess_config()
+            detected_language = getattr(self.whisper_engine, 'last_detected_language', None)
+            if detected_language:
+                postprocess_cfg['detected_language'] = detected_language
             fmt_overrides = app_rules_formatting_overrides(rule)
             if fmt_overrides:
                 postprocess_cfg = {**postprocess_cfg, **fmt_overrides}

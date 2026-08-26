@@ -4,6 +4,8 @@
 
 ### Free, Open-Source, **100% Offline** AI Dictation for Windows & macOS
 
+> **This checkout has local NTNU text-polishing customizations.** See [LOCAL_SETUP.md](LOCAL_SETUP.md) for the installed Windows configuration, privacy boundary, language routing, and update workflow.
+
 **Press a hotkey. Speak. Your words appear at the cursor.**
 No cloud. No subscription. No telemetry. Powered by [OpenAI Whisper](https://github.com/openai/whisper).
 
