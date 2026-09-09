@@ -24,7 +24,8 @@ Audio and speech recognition remain local. Only the completed text transcript is
 |---|---|
 | Repository | `C:\Dev\whisper-local` |
 | Python environment | `C:\Dev\whisper-local\.venv` |
-| Launcher | `C:\Dev\whisper-local\whisper-local-user.cmd` |
+| Visible/manual launcher | `C:\Dev\whisper-local\whisper-local-user.cmd` |
+| Background/restart launcher | `C:\Dev\whisper-local\whisper-local-autostart.vbs` |
 | User settings | `%APPDATA%\whisperkey\user_settings.yaml` |
 | NTNU credential | Windows user environment variable `NTNU_LLM_API_KEY` |
 | Whisper model | `large-v3-turbo` |
@@ -36,6 +37,14 @@ The launcher adds the CUDA, cuBLAS, and cuDNN DLL directories installed inside t
 ## Normal use
 
 Hold `Ctrl+Win`, dictate, and release the keys. Whisper transcribes locally and the language router applies the appropriate cleanup before pasting.
+
+### Starting and restarting on Windows
+
+- For a manual start with a visible diagnostic console, double-click `whisper-local-user.cmd`.
+- For startup, background launches, or restarts initiated by an automation/assistant, launch `whisper-local-autostart.vbs` with `wscript.exe`.
+- Do not leave the production instance attached to a retained automation terminal/PTY. On 2026-09-09, that process completed initialization and reported all hotkeys configured, but it did not receive physical Windows hotkey input. Relaunching through the VBS background launcher restored `Ctrl+Win`; the app log and a complete dictation verified the recovery.
+
+After an automated restart, do not treat a live PID or “Whisper Local ready” as sufficient verification. Confirm one physical `Ctrl+Win` dictation reaches the app log and is pasted into the foreground application.
 
 ### English cleanup
 
