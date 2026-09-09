@@ -36,12 +36,33 @@ def _model_size_hint(model_key: str) -> str:
     return ''
 
 
+def _select_allowed_language(language_probabilities, allowed_languages,
+                             fallback_language=None):
+    """Return the most probable language from the configured allow-list."""
+    allowed = set(allowed_languages)
+    candidates = [
+        (language, probability)
+        for language, probability in language_probabilities
+        if language in allowed
+    ]
+
+    selected = max(candidates, key=lambda candidate: candidate[1])
+    probabilities = dict(candidates)
+    if fallback_language in probabilities and selected[0] != fallback_language:
+        allowed_probability = sum(probabilities.values())
+        if allowed_probability and selected[1] / allowed_probability < 0.70:
+            return fallback_language, probabilities[fallback_language]
+    return selected
+
+
 class WhisperEngine:
     def __init__(self,
                  model_key: str = "tiny",
                  device: str = "cpu",
                  compute_type: str = "int8",
                  language: str = None,
+                 allowed_languages: list = None,
+                 fallback_language: str = None,
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
@@ -54,6 +75,17 @@ class WhisperEngine:
         self.device = device
         self.compute_type = compute_type
         self.language = None if language == 'auto' else language
+        self.allowed_languages = [
+            value.strip().lower()
+            for value in (allowed_languages or [])
+            if isinstance(value, str) and value.strip()
+        ]
+        fallback = (
+            fallback_language.strip().lower()
+            if isinstance(fallback_language, str)
+            else None
+        )
+        self.fallback_language = fallback if fallback in self.allowed_languages else None
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
@@ -213,10 +245,20 @@ class WhisperEngine:
                 audio_data = audio_data.flatten()
             
             audio_data = audio_data.astype(np.float32)
+
+            decode_language = self.language
+            detection_probability = None
+            if decode_language is None and self.allowed_languages:
+                _, _, language_probabilities = self.model.detect_language(audio_data)
+                decode_language, detection_probability = _select_allowed_language(
+                    language_probabilities,
+                    self.allowed_languages,
+                    fallback_language=self.fallback_language,
+                )
             
             transcribe_kwargs = dict(
                 beam_size=self.beam_size,
-                language=self.language,
+                language=decode_language,
                 task=self.task,
                 condition_on_previous_text=False,
             )
@@ -238,8 +280,12 @@ class WhisperEngine:
             print(f"   ✓ Transcription completed in {transcription_time:.1f} seconds")
             
             # Log some info about what we transcribed
-            detected_language = info.language
-            confidence = info.language_probability
+            detected_language = decode_language or info.language
+            confidence = (
+                detection_probability
+                if detection_probability is not None
+                else info.language_probability
+            )
             self.last_detected_language = detected_language
             self.logger.info(f"Transcription complete. Language: {detected_language} (confidence: {confidence:.2f}) - Time: {transcription_time:.2f}s")
             if self.log_transcriptions:

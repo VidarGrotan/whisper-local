@@ -36,6 +36,14 @@ whisper: # Whisper AI Model Settings
     # Set to specific language code to force language, or auto for auto-detection
     language: auto
 
+    # Optional allow-list for auto-detection. Empty means all Whisper languages.
+    # Example: [en, no] restricts recognition to English and Norwegian.
+    allowed_languages: []
+
+    # When allowed-language probabilities are close, prefer this language.
+    # Must also appear in allowed_languages. Empty means no preference.
+    fallback_language:
+
     # Transcription quality settings
     beam_size: 5 # Higher = more accurate but slower (1-10)
 
