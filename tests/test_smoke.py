@@ -772,6 +772,27 @@ class TranscriptLogTests(unittest.TestCase):
         self.assertEqual(entries[0]["text"], "Hello world")
         self.assertEqual(entries[0]["app"], "test.exe")
 
+    def test_record_and_load_preserves_raw_and_polished_pair(self):
+        import tempfile
+        import unittest.mock as mock
+        from whisper_key import transcript_log
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch('whisper_key.transcript_log.get_user_app_data_path', return_value=tmpdir):
+                transcript_log.record_transcript(
+                    "Polished text.",
+                    raw_text="um polished text",
+                    language="en",
+                    app="test.exe",
+                    duration_s=2.5,
+                )
+                entries = transcript_log.load_transcripts()
+
+        self.assertEqual(entries[0]["text"], "Polished text.")
+        self.assertEqual(entries[0]["raw_text"], "um polished text")
+        self.assertEqual(entries[0]["chars"], 14)
+        self.assertEqual(entries[0]["raw_chars"], 16)
+        self.assertEqual(entries[0]["language"], "en")
+
     def test_empty_text_not_logged(self):
         import tempfile
         import unittest.mock as mock
@@ -781,6 +802,81 @@ class TranscriptLogTests(unittest.TestCase):
                 transcript_log.record_transcript("", app="test.exe")
                 entries = transcript_log.load_transcripts()
         self.assertEqual(len(entries), 0)
+
+
+class TranscriptPipelineHistoryTests(unittest.TestCase):
+    def test_pipeline_saves_raw_and_polished_text_with_language(self):
+        import collections
+        import logging
+        import tempfile
+        import threading
+        import unittest.mock as mock
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from whisper_key import transcript_log
+        from whisper_key.state_manager import StateManager
+
+        manager = StateManager.__new__(StateManager)
+        manager._state_lock = threading.Lock()
+        manager.is_processing = False
+        manager._command_mode = False
+        manager._rephrase_mode = False
+        manager._rephrase_selection = ''
+        manager._streaming_delivery_active = False
+        manager.streaming_delivery = None
+        manager._pending_model_change = None
+        manager._pending_device_change = None
+        manager.level_overlay = None
+        manager.logger = logging.getLogger(__name__)
+        manager.last_transcription = None
+        manager.recent_transcriptions = collections.deque(maxlen=10)
+        manager.audio_feedback = SimpleNamespace(
+            play_stop_sound=lambda: None,
+            play_transcription_complete_sound=lambda: None,
+        )
+        manager.system_tray = SimpleNamespace(
+            notify=lambda message: None,
+            refresh_menu=lambda: None,
+        )
+        manager.audio_recorder = SimpleNamespace(
+            get_audio_duration=lambda audio: 1.5,
+        )
+        manager.whisper_engine = SimpleNamespace(
+            transcribe_audio=lambda audio: "um, hello world",
+            last_detected_language="en",
+        )
+        manager.app_rules = SimpleNamespace(match_for_foreground=lambda: None)
+        manager.config_manager = SimpleNamespace(
+            config={"audit": {"enabled": False}, "audio": {}},
+            get_postprocess_config=lambda: {"strip_filler_words": True},
+        )
+        manager.clipboard_manager = SimpleNamespace(
+            auto_paste=True,
+            deliver_transcription=lambda text, auto_enter: True,
+        )
+        manager._foreground_is_textable = lambda: True
+        manager._maybe_restart_continuous = lambda: None
+        manager._update_ui_state = lambda state: None
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                mock.patch(
+                    'whisper_key.transcript_log.get_user_app_data_path',
+                    return_value=tmpdir,
+                ), \
+                mock.patch(
+                    'whisper_key.state_manager.foreground.get_foreground_app',
+                    return_value={"exe": "test.exe"},
+                ), \
+                mock.patch('whisper_key.state_manager.record_transcription'), \
+                mock.patch('whisper_key.state_manager.audit_record'):
+            manager._transcription_pipeline(np.zeros(160, dtype=np.float32))
+            entries = transcript_log.load_transcripts()
+
+        self.assertEqual(entries[0]["raw_text"], "um, hello world")
+        self.assertEqual(entries[0]["text"], "hello world")
+        self.assertEqual(entries[0]["language"], "en")
 
 
 class SettingsUiModuleTests(unittest.TestCase):

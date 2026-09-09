@@ -504,6 +504,8 @@ class StateManager:
                     self.level_overlay.flash_failure("No speech detected")
                 return
 
+            raw_transcribed_text = transcribed_text
+
             if command_mode:
                 matched = self._handle_command_transcription(transcribed_text, use_auto_enter)
                 if self.level_overlay:
@@ -602,7 +604,13 @@ class StateManager:
                     duration_seconds=duration,
                     app=fg.get('exe', ''),
                 )
-                record_transcript(transcribed_text, app=fg.get('exe', ''), duration_s=duration)
+                record_transcript(
+                    transcribed_text,
+                    app=fg.get('exe', ''),
+                    duration_s=duration,
+                    raw_text=raw_transcribed_text,
+                    language=detected_language or '',
+                )
                 audit_enabled = (self.config_manager.config.get('audit') or {}).get('enabled', False)
                 audit_record('delivered', transcribed_text, fg.get('exe', ''), audit_enabled)
                 self._maybe_restart_continuous()

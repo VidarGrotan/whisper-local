@@ -27,15 +27,20 @@ _write_lock = threading.Lock()
 
 # Called from state_manager._transcription_pipeline after every successful
 # delivery. Silent no-op for empty text (which means a failed/silent recording).
-def record_transcript(text: str, app: str = '', duration_s: float = 0.0):
+def record_transcript(text: str, app: str = '', duration_s: float = 0.0,
+                      raw_text: str = None, language: str = ''):
     if not text:
         return
+    raw_text = text if raw_text is None else raw_text
     entry = {
         'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
         'text': text,
+        'raw_text': raw_text,
         'app': app,
         'duration_s': round(duration_s, 2),
         'chars': len(text),
+        'raw_chars': len(raw_text),
+        'language': language or '',
     }
     path = Path(get_user_app_data_path()) / _LOG_FILE
     try:
