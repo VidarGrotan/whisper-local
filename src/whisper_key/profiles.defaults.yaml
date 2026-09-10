@@ -16,9 +16,14 @@ profiles:
         auto_paste: true
         delivery_method: paste
       whisper:
-        model: base
+        model: large-v3-turbo
+        language: auto
+        allowed_languages:
+          - en
+          - no
+        fallback_language: en
         task: transcribe
-        initial_prompt: ""
+        initial_prompt: "English and Norwegian technical dictation for software development."
       voice_commands:
         enabled: true
 

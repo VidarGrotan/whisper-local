@@ -699,6 +699,20 @@ class ProfilesShapeTests(unittest.TestCase):
         self.assertIn('profiles', data)
         self.assertIn('dictation', data['profiles'])
 
+    def test_dictation_profile_preserves_production_language_model(self):
+        """Selecting Dictation must not downgrade the customized install."""
+        from ruamel.yaml import YAML
+
+        path = ROOT / "src" / "whisper_key" / "profiles.defaults.yaml"
+        with open(path, encoding="utf-8") as f:
+            data = YAML().load(f)
+
+        whisper = data["profiles"]["dictation"]["overrides"]["whisper"]
+        self.assertEqual(whisper["model"], "large-v3-turbo")
+        self.assertEqual(whisper["language"], "auto")
+        self.assertEqual(whisper["allowed_languages"], ["en", "no"])
+        self.assertEqual(whisper["fallback_language"], "en")
+
 
 class UtilsTests(unittest.TestCase):
     def test_resolve_asset_path_relative(self):
