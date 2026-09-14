@@ -10,6 +10,7 @@ def acquire_lock(app_name: str):
     mutex_handle = win32event.CreateMutex(None, True, mutex_name)
 
     if win32api.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        mutex_handle.Close()
         return None
 
     return mutex_handle

@@ -26,7 +26,7 @@ Audio and speech recognition remain local. Only the completed text transcript is
 | Python environment | `C:\Dev\whisper-local\.venv` |
 | Visible/manual launcher | `C:\Dev\whisper-local\whisper-local-user.cmd` |
 | Background/restart launcher | `C:\Dev\whisper-local\whisper-local-autostart.vbs` |
-| Windows login startup | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `Whisper Local` |
+| Windows login startup | Scheduled Task `\WhisperLocal` (20-second logon delay) |
 | User settings | `%APPDATA%\whisperkey\user_settings.yaml` |
 | NTNU credential | Windows user environment variable `NTNU_LLM_API_KEY` |
 | Whisper model | `large-v3-turbo` |
@@ -43,7 +43,8 @@ Hold `Ctrl+Win`, dictate, and release the keys. Whisper transcribes locally and 
 
 - For a manual start with a visible diagnostic console, double-click `whisper-local-user.cmd`.
 - For startup, background launches, or restarts initiated by an automation/assistant, launch `whisper-local-autostart.vbs` with `wscript.exe`.
-- The per-user Windows `Run` entry named `Whisper Local` must point to `wscript.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"`. Check this entry when the app does not start after login.
+- The delayed Scheduled Task `\WhisperLocal` is the sole login-start mechanism. Both `Whisper Local` and `WhisperLocal` values must be absent from `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; either value creates a duplicate-launch race.
+- Check the durable startup state with `powershell -ExecutionPolicy Bypass -File tools\repair-local-startup.ps1 -Check`. Run the same command without `-Check` to recreate the task and remove duplicate registry entries.
 - Do not leave the production instance attached to a retained automation terminal/PTY. On 2026-09-09, that process completed initialization and reported all hotkeys configured, but it did not receive physical Windows hotkey input. Relaunching through the VBS background launcher restored `Ctrl+Win`; the app log and a complete dictation verified the recovery.
 
 After an automated restart, do not treat a live PID or “Whisper Local ready” as sufficient verification. Confirm one physical `Ctrl+Win` dictation reaches the app log and is pasted into the foreground application.
@@ -158,6 +159,7 @@ Do not push custom changes directly to the upstream repository. Use the personal
 - App will not start: run `whisper-local-user.cmd --doctor` from a visible PowerShell window.
 - Deliberate silence is not a microphone fault. A normal silent test logs the hotkey press/release, about 0.5 seconds of retained pre-roll, and `VAD check: SILENCE`, with no transcript produced.
 - A dead continuous-audio stream can leave the Python process, tray icon, and hotkeys alive while Windows no longer shows the microphone-in-use icon. The verified 2026-09-11 signature was: a spoken attempt logged `Starting audio recording` and `Push-to-talk key released`, but no subsequent resampling, recorded-duration, VAD, or transcription entry. A silent recording being trimmed to the 0.5-second pre-roll is normal and does not establish this failure by itself. Confirm that the configured input device still exists, then restart through `wscript.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"` and verify one physical spoken `Ctrl+Win` dictation. The underlying event that stopped the PortAudio callback was not captured in the log; do not claim the user's deliberate silence caused it.
+- Repeated failure specifically after Windows login: run `tools\repair-local-startup.ps1 -Check`. A registry `Run` entry plus the delayed Scheduled Task launches two copies. Before the 2026-09-14 mutex fix, each failed lock retry leaked a mutex handle, allowing the replacement process to keep its own lock alive and remain partially initialized. A PID, GPU allocation, or tray icon alone does not prove that instance is healthy; `app.log` must contain a current initialization sequence.
 - Configuration problem: compare `%APPDATA%\whisperkey\user_settings.yaml` with its local backup files before resetting anything.
 - Code regression after an upstream merge: return to the last known-good commit on `local/ntnu-polish`; do not use destructive Git reset commands while uncommitted work exists.
 - Unexpected `base` model or unrestricted language output: check both `user_settings.yaml` and the active profile in `profiles.yaml`. The local `Dictation` profile must preserve `large-v3-turbo`, `allowed_languages: [en, no]`, and `fallback_language: en`.

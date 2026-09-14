@@ -6,6 +6,7 @@ In particular, before starting, restarting, or troubleshooting the running Windo
 
 - Use `whisper-local-user.cmd` only for a manual start with a visible diagnostic console.
 - Use `whisper-local-autostart.vbs` through `wscript.exe` for background, startup, or agent-initiated restarts.
+- Keep the delayed `WhisperLocal` Scheduled Task as the only login-start mechanism. Registry `Run` entries create a duplicate-launch race and must remain absent. Use `tools\repair-local-startup.ps1` to inspect or restore this state.
 - Do not leave the production instance attached to an agent's retained terminal or PTY.
 - Do not infer success from a live PID or the “Whisper Local ready” message alone. Verify one physical `Ctrl+Win` dictation reaches the app log and auto-pastes into the foreground application.
 
