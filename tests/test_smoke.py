@@ -2102,7 +2102,28 @@ class ReportedIssueTests(unittest.TestCase):
             if saved is not None:
                 os.environ['PYAPP'] = saved
         self.assertTrue(windowed[0].lower().endswith('python.exe'))
-        self.assertTrue(hidden[0].lower().endswith('pythonw.exe'))
+        self.assertTrue(hidden[0].lower().endswith('wscript.exe'))
+        self.assertTrue(hidden[1].lower().endswith('whisper-local-autostart.vbs'))
+
+    def test_local_windows_autostart_uses_cuda_aware_vbs_launcher(self):
+        """The local checkout must preserve its NVIDIA DLL setup at login."""
+        if sys.platform != 'win32':
+            self.skipTest('local VBS launcher is Windows-only')
+        import unittest.mock as mock
+        from pathlib import Path
+        from whisper_key import utils
+
+        repo = Path(utils.__file__).resolve().parents[2]
+        local_python = repo / '.venv' / 'Scripts' / 'python.exe'
+        expected = [
+            str(Path(os.environ['SystemRoot']) / 'System32' / 'wscript.exe'),
+            str(repo / 'whisper-local-autostart.vbs'),
+        ]
+
+        with mock.patch.object(utils.sys, 'executable', str(local_python)):
+            command = utils.build_relaunch_command(windowless=True)
+
+        self.assertEqual(command, expected)
 
     def test_autostart_delegates_to_shared_builder(self):
         # The two call sites disagreed once (autostart fixed for #2, tray left

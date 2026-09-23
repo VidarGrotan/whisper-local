@@ -120,6 +120,25 @@ def build_relaunch_command(windowless: bool = False) -> list:
     if getattr(sys, "frozen", False) or exe.lower().endswith("whisper-local.exe"):
         return [exe]
 
+    # This PC's editable checkout needs the project launcher to prepend the
+    # NVIDIA runtime DLL directories.  A plain pythonw -m launch can appear to
+    # start at login while missing the installed CUDA-aware operating context.
+    # Keep this deliberately narrow: only the interpreter inside this checkout's
+    # own .venv receives the override; normal pip and packaged installs retain
+    # the portable command below.
+    if windowless and sys.platform == "win32":
+        repo_root = Path(__file__).resolve().parents[2]
+        local_scripts = repo_root / ".venv" / "Scripts"
+        try:
+            is_local_venv = Path(exe).resolve().parent == local_scripts.resolve()
+        except OSError:
+            is_local_venv = False
+        launcher = repo_root / "whisper-local-autostart.vbs"
+        system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        wscript = Path(system_root) / "System32" / "wscript.exe"
+        if is_local_venv and launcher.is_file():
+            return [str(wscript), str(launcher)]
+
     runner = _windowless_python(exe) if (windowless and sys.platform == "win32") else exe
     return [runner, "-m", "whisper_key.main"]
 
