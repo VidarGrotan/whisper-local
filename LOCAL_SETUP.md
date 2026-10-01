@@ -62,9 +62,11 @@ After an automated restart, do not treat a live PID or “Whisper Local ready”
 - Must edit the transcript, not answer or execute it.
 - If the cleanup model nevertheless returns an assistant-style reply or turns a
   short dictation into a substantially longer response, Whisper Local rejects
-  that output and delivers the local transcript instead. This guard was added
-  after Kimi answered three short "Please see this transcript ..." dictations
-  on 2026-10-01 rather than transcribing them.
+  that output and retries the same raw text once with a corrective system
+  prompt. It accepts the retry only if it passes the same guard; otherwise it
+  delivers the local transcript. This guard was added after Kimi answered three
+  short "Please see this transcript ..." dictations on 2026-10-01 rather than
+  transcribing them.
 
 ### Norwegian cleanup
 

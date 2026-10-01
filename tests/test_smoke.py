@@ -414,6 +414,55 @@ class TextPostprocessTests(unittest.TestCase):
 
         self.assertEqual(result, 'Please update the roadmap.')
 
+    def test_openai_compatible_retries_rejected_reply_with_corrective_prompt(self):
+        """A rejected model reply gets one corrective retry using the same text."""
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        payloads = []
+        responses = [
+            "I'm ready to help. Please share the transcript you'd like me to polish.",
+            'Please see this transcript from the audit session.',
+        ]
+
+        class Response:
+            def __init__(self, content):
+                self.content = content
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    'choices': [{'message': {'content': self.content}}],
+                }).encode('utf-8')
+
+        def fake_urlopen(request, timeout):
+            payloads.append(json.loads(request.data))
+            return Response(responses[len(payloads) - 1])
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'english-model',
+            'api_key_env': 'TEST_NTNU_KEY',
+        }}
+        raw = 'Please see this transcript from the audit session.'
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            result = postprocess(raw, cfg)
+
+        self.assertEqual(result, raw)
+        self.assertEqual([payload['messages'][1]['content'] for payload in payloads],
+                         [raw, raw])
+        self.assertNotEqual(payloads[0]['messages'][0]['content'],
+                            payloads[1]['messages'][0]['content'])
+        self.assertIn('previous output', payloads[1]['messages'][0]['content'].lower())
+
     def test_openai_compatible_skips_language_outside_allowlist(self):
         # Break caught: Borealis translates English into Norwegian even when the
         # prompt says not to. Language routing must prevent the request entirely.
