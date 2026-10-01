@@ -318,6 +318,102 @@ class TextPostprocessTests(unittest.TestCase):
 
         self.assertEqual(result, 'Æ kjæm itj i dag.')
 
+    def test_openai_compatible_assistant_reply_preserves_raw_transcript(self):
+        """A cleanup model must edit dictated text, never answer it."""
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    'choices': [{'message': {'content':
+                        "I'm ready to help. Please share the transcript you'd like me to polish."}}],
+                }).encode('utf-8')
+
+        cfg = {
+            'detected_language': 'en',
+            'openai_compatible': {
+                'enabled': True,
+                'endpoint': 'https://llm.example.test/v1',
+                'api_key_env': 'TEST_NTNU_KEY',
+                'routes': {'en': {'model': 'english-model'}},
+            },
+        }
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', return_value=Response()):
+            result = postprocess('Please see this transcript from the audio session.', cfg)
+
+        self.assertEqual(result, 'Please see this transcript from the audio session.')
+
+    def test_openai_compatible_extreme_short_expansion_preserves_raw_transcript(self):
+        """A short instruction cannot turn into a long response or prompt echo."""
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                content = (
+                    'Here is a detailed response explaining the requested plan, including '
+                    'background, implementation steps, testing requirements, and next actions.'
+                )
+                return json.dumps({'choices': [{'message': {'content': content}}]}).encode('utf-8')
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'english-model',
+            'api_key_env': 'TEST_NTNU_KEY',
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', return_value=Response()):
+            result = postprocess('Please provide a short plan.', cfg)
+
+        self.assertEqual(result, 'Please provide a short plan.')
+
+    def test_openai_compatible_concise_short_edit_is_kept(self):
+        """The safety gate must retain ordinary concise cleanup."""
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    'choices': [{'message': {'content': 'Please update the roadmap.'}}],
+                }).encode('utf-8')
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'english-model',
+            'api_key_env': 'TEST_NTNU_KEY',
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', return_value=Response()):
+            result = postprocess('Okay, so please update the road map.', cfg)
+
+        self.assertEqual(result, 'Please update the roadmap.')
+
     def test_openai_compatible_skips_language_outside_allowlist(self):
         # Break caught: Borealis translates English into Norwegian even when the
         # prompt says not to. Language routing must prevent the request entirely.

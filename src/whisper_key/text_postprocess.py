@@ -462,6 +462,43 @@ def _ollama_polish(text: str, cfg: dict) -> str:
     return ''
 
 
+_ASSISTANT_REPLY_OPENINGS = re.compile(
+    r"^(?:"
+    r"i(?:'m| am) ready\b|"
+    r"i (?:do not|don't) see\b|"
+    r"i can help\b|"
+    r"i(?:'d| would) be happy\b|"
+    r"sure[,.!]|"
+    r"certainly[,.!]"
+    r")",
+    re.IGNORECASE,
+)
+_TRANSCRIPT_REQUEST = re.compile(
+    r"\bplease\s+(?:share|paste|provide)\s+(?:the|your|a)\s+transcript\b",
+    re.IGNORECASE,
+)
+
+
+def _unsafe_llm_polish(source: str, candidate: str) -> bool:
+    """Return True when a cleanup result looks like a reply, not an edit."""
+    normalized = candidate.strip()
+    if _ASSISTANT_REPLY_OPENINGS.search(normalized):
+        return True
+
+    if (_TRANSCRIPT_REQUEST.search(normalized)
+            and not _TRANSCRIPT_REQUEST.search(source)):
+        return True
+
+    source_words = re.findall(r"\b[\w']+\b", source, flags=re.UNICODE)
+    candidate_words = re.findall(r"\b[\w']+\b", candidate, flags=re.UNICODE)
+    if (len(source_words) <= 20
+            and len(candidate_words) > max(len(source_words) * 2,
+                                           len(source_words) + 8)):
+        return True
+
+    return False
+
+
 # Send text-only cleanup requests to an OpenAI-compatible Chat Completions API.
 def _openai_compatible_polish(text: str, cfg: dict) -> str:
     endpoint = cfg.get('endpoint', '').rstrip('/')
@@ -508,6 +545,12 @@ def _openai_compatible_polish(text: str, cfg: dict) -> str:
             data = json.loads(resp.read())
         polished = data['choices'][0]['message']['content'].strip()
         if polished:
+            if _unsafe_llm_polish(text, polished):
+                logger.warning(
+                    "OpenAI-compatible post-edit returned an assistant-like response; "
+                    "using raw transcript"
+                )
+                return ''
             logger.debug("OpenAI-compatible polish applied")
             return polished
     except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as e:

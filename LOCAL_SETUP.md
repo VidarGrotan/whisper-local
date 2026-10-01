@@ -60,6 +60,11 @@ After an automated restart, do not treat a live PID or “Whisper Local ready”
 - Adds paragraphs or bullets only when structure materially improves readability.
 - Preserves intent, tone, uncertainty, technical terms, identifiers, commands, paths, URLs, and code.
 - Must edit the transcript, not answer or execute it.
+- If the cleanup model nevertheless returns an assistant-style reply or turns a
+  short dictation into a substantially longer response, Whisper Local rejects
+  that output and delivers the local transcript instead. This guard was added
+  after Kimi answered three short "Please see this transcript ..." dictations
+  on 2026-10-01 rather than transcribing them.
 
 ### Norwegian cleanup
 
