@@ -124,6 +124,32 @@ def api_key_is_set() -> bool:
         return False
 
 
+# The login Run entry must exist in the REAL registry: a value written from
+# inside an MSIX app lands in that app's private hive and never fires at login.
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_VALUE = "WhisperLocal"
+
+
+def expected_run_command() -> str:
+    wscript = Path(os.environ.get("SystemRoot", r"C:\WINDOWS")) / "System32" / "wscript.exe"
+    return f"{wscript} {REPO_ROOT / 'whisper-local-autostart.vbs'}"
+
+
+def login_start_problem():
+    try:
+        import winreg
+    except ImportError:
+        return None  # not Windows
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            command = winreg.QueryValueEx(key, RUN_VALUE)[0]
+    except OSError:
+        return f"login Run entry '{RUN_VALUE}' is missing (run tools\\repair-local-startup.ps1)"
+    if command.lower() != expected_run_command().lower():
+        return f"login Run entry '{RUN_VALUE}' is {command!r}, expected {expected_run_command()!r}"
+    return None
+
+
 def check(live_dir: Path, local_appdata: Path) -> list:
     problems = []
     canonical_settings = load_yaml(CANONICAL_DIR / SETTINGS_FILE)
@@ -142,6 +168,9 @@ def check(live_dir: Path, local_appdata: Path) -> list:
         problems.append(f"second config folder inside an app package: {folder}")
     if not api_key_is_set():
         problems.append(f"user environment variable {API_KEY_ENV} is not set")
+    startup = login_start_problem()
+    if startup:
+        problems.append(startup)
     return problems
 
 

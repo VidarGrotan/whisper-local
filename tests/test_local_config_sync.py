@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
@@ -29,8 +30,10 @@ class LocalConfigSyncTests(unittest.TestCase):
         self._temp.cleanup()
 
     def _check(self):
-        return [p for p in sync.check(self.live, self.local_appdata)
-                if sync.API_KEY_ENV not in p]
+        # The API key and the login Run entry are machine state, not config files.
+        with mock.patch.object(sync, "login_start_problem", return_value=None):
+            return [p for p in sync.check(self.live, self.local_appdata)
+                    if sync.API_KEY_ENV not in p]
 
     def test_install_into_empty_folder_then_check_is_clean(self):
         sync.install(self.live, "t1")
@@ -93,6 +96,33 @@ class LocalConfigSyncTests(unittest.TestCase):
         self.assertFalse(package.exists())
         self.assertTrue(retired.is_dir())
         self.assertTrue((self.live / "backups" / "package-user_settings.yaml.pre-ntnu.t5").is_file())
+
+
+@unittest.skipUnless(sys.platform == "win32", "login Run entry is Windows-only")
+class LoginRunEntryTests(unittest.TestCase):
+    def _with_run_value(self, command):
+        """Fake HKCU Run key holding `command` (None = value absent)."""
+        import winreg
+        fake = mock.MagicMock()
+        fake.HKEY_CURRENT_USER = winreg.HKEY_CURRENT_USER
+        if command is None:
+            fake.OpenKey.side_effect = OSError("missing")
+        else:
+            fake.QueryValueEx.return_value = (command, 1)
+        return mock.patch.dict(sys.modules, {"winreg": fake})
+
+    def test_correct_run_entry_passes(self):
+        with self._with_run_value(sync.expected_run_command().upper()):
+            self.assertIsNone(sync.login_start_problem())
+
+    def test_missing_run_entry_is_reported(self):
+        """The Sep 23 - Oct 6 failure: the entry existed only in Codex's private hive."""
+        with self._with_run_value(None):
+            self.assertIn("missing", sync.login_start_problem())
+
+    def test_wrong_run_entry_is_reported(self):
+        with self._with_run_value(r"C:\elsewhere\launcher.cmd"):
+            self.assertIn("expected", sync.login_start_problem())
 
 
 if __name__ == "__main__":

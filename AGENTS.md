@@ -14,6 +14,7 @@ Configuration:
 
 - `local-config\` is the source of truth for production settings. Change settings there, apply them with `tools\sync_local_config.py`, and never edit only the live `%APPDATA%\whisperkey` files.
 - Before claiming the install works, run `.venv\Scripts\python.exe tools\sync_local_config.py --check` (it must exit 0), then verify a real dictation in the live `app.log` and `transcripts.jsonl`.
+- MSIX apps such as Codex desktop also get a private copy of the HKCU registry. A login Run entry written or checked from inside one doesn't exist for Windows. Run `tools\repair-local-startup.ps1` only from an unsandboxed terminal.
 - If what you read under `%APPDATA%\whisperkey` contradicts another agent, check for the app-package copy under `%LOCALAPPDATA%\Packages\*\LocalCache\Roaming\whisperkey` before arguing.
 
 Preserve user settings and transcript history under `%APPDATA%\whisperkey`. Never copy the NTNU API key into repository files; configuration must refer only to the `NTNU_LLM_API_KEY` Windows environment variable.
