@@ -550,6 +550,12 @@ postprocess: # Transcription post-processing pipeline
         model: ""
         api_key_env: ""
         timeout: 15
+        # Number of transport attempts for the selected route model. A rejected
+        # assistant-style reply still gets its separate corrective-prompt retry.
+        retry_attempts: 1
+        # Optional final model attempt after the primary attempts are exhausted.
+        fallback_model: ""
+        fallback_timeout: 15
         only_languages: []
         routes: {}
         prompt: |-

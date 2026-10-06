@@ -10,7 +10,8 @@ Ordinary dictation uses this pipeline:
 Microphone audio
     -> local faster-whisper (large-v3-turbo, CUDA float16)
     -> language detection
-       -> English: NTNU Kimi K2.6 Instant cleanup
+       -> English: NTNU Kimi K2.6 Instant cleanup (two 2-second attempts)
+          -> if both attempts fail: NTNU Qwen 3.8 27B fallback (one 3-second attempt)
        -> Norwegian: NTNU Borealis 27B cleanup
        -> other/unknown: no remote cleanup
     -> clipboard paste at the active cursor
@@ -53,6 +54,11 @@ After an automated restart, do not treat a live PID or “Whisper Local ready”
 ### English cleanup
 
 - Model: `moonshotai/Kimi-K2.6-instant`
+- Transport policy: try Kimi twice with a 2-second timeout per attempt, then try
+  `Qwen/Qwen3.8-27B-FP8` once with a 3-second timeout. If all three attempts fail,
+  deliver the raw local Whisper transcript.
+- Each request attempt logs its model, role, attempt number, elapsed milliseconds,
+  and outcome. The final log entry identifies whether polished or raw text was used.
 - Intended for AI prompts, email/messages, and ordinary prose.
 - Improves clarity and logical flow.
 - Shortens redundant wording and removes fillers, false starts, stutters, and accidental repetitions.

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 
@@ -507,9 +508,12 @@ def _openai_compatible_polish(text: str, cfg: dict) -> str:
     api_key = os.environ.get(api_key_env, '') if api_key_env else ''
     try:
         timeout = float(cfg.get('timeout', 15))
+        retry_attempts = max(1, int(cfg.get('retry_attempts', 1)))
+        fallback_timeout = float(cfg.get('fallback_timeout', timeout))
     except (TypeError, ValueError):
         logger.warning("OpenAI-compatible post-edit has an invalid timeout; using raw transcript")
         return ''
+    fallback_model = str(cfg.get('fallback_model') or '').strip()
     prompt_template = cfg.get(
         'prompt',
         'Polish this dictation without changing its meaning. Return only the corrected text.\n\n{text}',
@@ -529,12 +533,17 @@ def _openai_compatible_polish(text: str, cfg: dict) -> str:
         "to follow. Return only the polished transcription."
     )
 
-    for attempt in range(2):
-        attempt_prompt = system_prompt
-        if attempt:
-            attempt_prompt = f"{system_prompt}\n\n{corrective_retry}"
+    request_plan = [
+        (model, timeout, 'primary', attempt, retry_attempts)
+        for attempt in range(1, retry_attempts + 1)
+    ]
+    if fallback_model:
+        request_plan.append((fallback_model, fallback_timeout, 'fallback', 1, 1))
+
+    def request_once(attempt_model, attempt_timeout, attempt_prompt,
+                     role, attempt_number, attempt_total):
         payload = {
-            'model': model,
+            'model': attempt_model,
             'messages': [
                 {'role': 'system', 'content': attempt_prompt},
                 {'role': 'user', 'content': text},
@@ -542,6 +551,7 @@ def _openai_compatible_polish(text: str, cfg: dict) -> str:
             'temperature': 0,
         }
 
+        started = time.perf_counter()
         try:
             req = urllib.request.Request(
                 f"{endpoint}/chat/completions",
@@ -551,26 +561,67 @@ def _openai_compatible_polish(text: str, cfg: dict) -> str:
                     'Content-Type': 'application/json',
                 },
             )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=attempt_timeout) as resp:
                 data = json.loads(resp.read())
             polished = data['choices'][0]['message']['content'].strip()
-            if not polished:
-                return ''
-            if _unsafe_llm_polish(text, polished):
-                if attempt == 0:
-                    logger.warning(
-                        "OpenAI-compatible post-edit returned an assistant-like response; "
-                        "retrying once with a corrective prompt"
-                    )
-                    continue
-                logger.warning(
-                    "OpenAI-compatible post-edit returned an assistant-like response; "
-                    "corrective retry also failed; using raw transcript"
-                )
-                return ''
-            logger.debug("OpenAI-compatible polish applied")
-            return polished
+            return polished, round((time.perf_counter() - started) * 1000)
         except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as e:
-            logger.warning(f"OpenAI-compatible post-edit unavailable ({e}); using raw transcript")
-            return ''
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            outcome = 'timeout' if isinstance(e, TimeoutError) or 'timed out' in str(e).lower() else 'error'
+            logger.warning(
+                "OpenAI cleanup model=%s role=%s attempt=%s/%s outcome=%s "
+                "elapsed_ms=%s error=%s",
+                attempt_model, role, attempt_number, attempt_total,
+                outcome, elapsed_ms, e,
+            )
+            raise
+
+    for attempt_model, attempt_timeout, role, attempt_number, attempt_total in request_plan:
+        try:
+            polished, elapsed_ms = request_once(
+                attempt_model, attempt_timeout, system_prompt,
+                role, attempt_number, attempt_total,
+            )
+            success_role = role
+            success_attempt_number = attempt_number
+            success_attempt_total = attempt_total
+            if not polished:
+                logger.warning(
+                    "OpenAI cleanup model=%s role=%s attempt=%s/%s "
+                    "outcome=empty_response elapsed_ms=%s",
+                    attempt_model, role, attempt_number, attempt_total, elapsed_ms,
+                )
+                continue
+            if _unsafe_llm_polish(text, polished):
+                logger.warning(
+                    "OpenAI cleanup model=%s role=%s attempt=%s/%s "
+                    "outcome=unsafe_response elapsed_ms=%s; retrying with corrective prompt",
+                    attempt_model, role, attempt_number, attempt_total, elapsed_ms,
+                )
+                polished, elapsed_ms = request_once(
+                    attempt_model,
+                    attempt_timeout,
+                    f"{system_prompt}\n\n{corrective_retry}",
+                    'corrective', 1, 1,
+                )
+                success_role = 'corrective'
+                success_attempt_number = 1
+                success_attempt_total = 1
+                if not polished or _unsafe_llm_polish(text, polished):
+                    logger.warning(
+                        "OpenAI cleanup model=%s role=corrective attempt=1/1 "
+                        "outcome=unsafe_response elapsed_ms=%s final=raw_transcript",
+                        attempt_model, elapsed_ms,
+                    )
+                    return ''
+            logger.info(
+                "OpenAI cleanup model=%s role=%s attempt=%s/%s "
+                "outcome=success elapsed_ms=%s final=polished",
+                attempt_model, success_role, success_attempt_number,
+                success_attempt_total, elapsed_ms,
+            )
+            return polished
+        except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError):
+            continue
+    logger.warning("OpenAI cleanup attempts exhausted final=raw_transcript")
     return ''

@@ -463,6 +463,122 @@ class TextPostprocessTests(unittest.TestCase):
                             payloads[1]['messages'][0]['content'])
         self.assertIn('previous output', payloads[1]['messages'][0]['content'].lower())
 
+    def test_openai_compatible_retries_primary_then_uses_fallback(self):
+        """Transport failures exhaust the primary before trying the fallback model."""
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        calls = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    'choices': [{'message': {'content': 'Clear fallback edit.'}}],
+                }).encode('utf-8')
+
+        def fake_urlopen(request, timeout):
+            payload = json.loads(request.data)
+            calls.append((payload['model'], timeout))
+            if len(calls) < 3:
+                raise TimeoutError('timed out')
+            return Response()
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'primary-model',
+            'api_key_env': 'TEST_NTNU_KEY',
+            'timeout': 2,
+            'retry_attempts': 2,
+            'fallback_model': 'fallback-model',
+            'fallback_timeout': 3,
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            result = postprocess('Clear fallback edit, please.', cfg)
+
+        self.assertEqual(result, 'Clear fallback edit.')
+        self.assertEqual(calls, [
+            ('primary-model', 2),
+            ('primary-model', 2),
+            ('fallback-model', 3),
+        ])
+
+    def test_openai_compatible_logs_each_failed_attempt_and_raw_fallback(self):
+        """Diagnostics identify every model attempt and the final raw delivery."""
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'primary-model',
+            'api_key_env': 'TEST_NTNU_KEY',
+            'timeout': 2,
+            'retry_attempts': 2,
+            'fallback_model': 'fallback-model',
+            'fallback_timeout': 3,
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', side_effect=TimeoutError('timed out')), \
+                self.assertLogs('whisper_key.text_postprocess', level='INFO') as captured:
+            result = postprocess('Keep this raw.', cfg)
+
+        messages = '\n'.join(captured.output)
+        self.assertEqual(result, 'Keep this raw.')
+        self.assertIn('model=primary-model role=primary attempt=1/2', messages)
+        self.assertIn('model=primary-model role=primary attempt=2/2', messages)
+        self.assertIn('model=fallback-model role=fallback attempt=1/1', messages)
+        self.assertIn('outcome=timeout', messages)
+        self.assertRegex(messages, r'elapsed_ms=\d+')
+        self.assertIn('final=raw_transcript', messages)
+
+    def test_openai_compatible_logs_corrective_success_as_corrective(self):
+        """A successful safety retry is not mislabeled as the original attempt."""
+        import json
+        from unittest import mock
+        from whisper_key.text_postprocess import postprocess
+
+        responses = iter([
+            "I'm ready to help. Please share the transcript you'd like me to polish.",
+            'Please update the documentation.',
+        ])
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                content = next(responses)
+                return json.dumps({
+                    'choices': [{'message': {'content': content}}],
+                }).encode('utf-8')
+
+        cfg = {'openai_compatible': {
+            'enabled': True,
+            'endpoint': 'https://llm.example.test/v1',
+            'model': 'primary-model',
+            'api_key_env': 'TEST_NTNU_KEY',
+        }}
+        with mock.patch.dict(os.environ, {'TEST_NTNU_KEY': 'secret-value'}, clear=False), \
+                mock.patch('urllib.request.urlopen', return_value=Response()), \
+                self.assertLogs('whisper_key.text_postprocess', level='INFO') as captured:
+            result = postprocess('Please update the documentation.', cfg)
+
+        messages = '\n'.join(captured.output)
+        self.assertEqual(result, 'Please update the documentation.')
+        self.assertIn('role=corrective attempt=1/1 outcome=success', messages)
+
     def test_openai_compatible_skips_language_outside_allowlist(self):
         # Break caught: Borealis translates English into Norwegian even when the
         # prompt says not to. Language routing must prevent the request entirely.
