@@ -306,6 +306,34 @@ def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, l
     if state_manager:
         state_manager.shutdown()
 
+# Launchers in a source checkout that start the app with its CUDA PATH set up,
+# in preference order (the .exe avoids a console flash).
+_CHECKOUT_LAUNCHERS = ('WhisperLocalLauncher.exe', 'whisper-local-autostart.vbs')
+
+
+# A start from inside a Store app (e.g. Codex desktop) would read a redirected,
+# private %APPDATA%. Hand the start to Explorer instead; returns True when this
+# process should exit because a clean instance is on its way.
+def _relaunch_if_inside_app_package() -> bool:
+    package = app.current_app_package_name()
+    if not package:
+        return False
+
+    from pathlib import Path
+    checkout_root = Path(__file__).resolve().parents[2]
+    for name in _CHECKOUT_LAUNCHERS:
+        launcher = checkout_root / name
+        if launcher.is_file():
+            print(f"Started inside app package {package}; its %APPDATA% is redirected.")
+            print(f"Relaunching via Explorer: {launcher}")
+            app.relaunch_outside_app_package(launcher)
+            return True
+
+    print(f"WARNING: running inside app package {package}. Settings, logs and history "
+          f"will go to that package's private %APPDATA% copy, not your normal one.")
+    return False
+
+
 def main():
     # Under pythonw.exe (windowless launch — autostart shortcuts, the pyapp .exe
     # before it allocates a console, etc.) there is no console, so sys.stdout and
@@ -470,6 +498,9 @@ def main():
     if args.serve:
         from .local_server import run_server
         sys.exit(run_server(args.serve_host, args.serve_port))
+
+    if _relaunch_if_inside_app_package():
+        sys.exit(0)
 
     console.setup()
     sys.stdout.write("\033]0;Whisper Local\007")

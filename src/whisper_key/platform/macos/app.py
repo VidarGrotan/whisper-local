@@ -32,6 +32,16 @@ def getch():
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
 
+# Windows-only concern (MSIX %APPDATA% redirection); macOS has no equivalent.
+def current_app_package_name():
+    return None
+
+def is_running_in_app_package():
+    return False
+
+def relaunch_outside_app_package(launcher_path):
+    pass
+
 def run_event_loop(shutdown_event):
     app = NSApplication.sharedApplication()
     while not shutdown_event.is_set():
