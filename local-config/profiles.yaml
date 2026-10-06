@@ -1,0 +1,73 @@
+# Whisper Local — Profiles
+#
+# Each profile defines overrides applied to user_settings.yaml when the
+# profile is activated from the system tray "Profile" submenu.
+#
+# Sections that can be overridden: any top-level key in config.defaults.yaml
+# (whisper, hotkey, vad, audio, clipboard, voice_commands, ...).
+
+active: dictation
+
+profiles:
+  dictation:
+    description: General-purpose voice typing
+    overrides:
+      clipboard:
+        auto_paste: true
+        delivery_method: paste
+      whisper:
+        model: large-v3-turbo
+        language: auto
+        allowed_languages:
+          - en
+          - no
+        fallback_language: en
+        task: transcribe
+        initial_prompt: "English and Norwegian technical dictation for software development."
+      voice_commands:
+        enabled: true
+
+  chat:
+    description: Hold-to-talk for chat apps; auto-send on Alt
+    overrides:
+      hotkey:
+        recording_mode: push_to_talk
+      clipboard:
+        auto_paste: true
+        delivery_method: paste
+      whisper:
+        task: transcribe
+        initial_prompt: "Casual chat message. Friendly tone."
+
+  code:
+    description: Copy-only mode for editors; never auto-send
+    overrides:
+      clipboard:
+        auto_paste: false
+        delivery_method: paste
+      whisper:
+        task: transcribe
+        initial_prompt: "Programming context. Identifiers, snake_case, camelCase, file paths, regex. Keep verbatim."
+      voice_commands:
+        enabled: true
+
+  notes:
+    description: Quiet copy-to-clipboard mode for note-taking
+    overrides:
+      clipboard:
+        auto_paste: false
+      whisper:
+        model: base
+        task: transcribe
+        initial_prompt: "Note-taking. Markdown formatting. Bullet points."
+      voice_commands:
+        enabled: false
+
+  translate:
+    description: Translate any spoken language into English
+    overrides:
+      whisper:
+        task: translate
+        language: auto
+      clipboard:
+        auto_paste: true

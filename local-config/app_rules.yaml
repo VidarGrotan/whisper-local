@@ -1,0 +1,29 @@
+# local-config/app_rules.yaml
+# Production per-app rules for Vidar's PC (synced to %APPDATA%\whisperkey).
+# Format and supported keys: src/whisper_key/app_rules.defaults.yaml.
+# Rules match top-down on exe name or window title; first match wins.
+# Nothing here ever auto-sends: dictation is pasted and the user presses ENTER.
+
+rules:
+  # VS Code, including its terminal (Claude Code/Codex prompts): paste,
+  # bilingual identifier bias, verbatim casing and punctuation.
+  - match: ["code.exe"]
+    auto_paste: true
+    auto_send: false
+    initial_prompt: "Programming prompt in English or Norwegian. Preserve technical identifiers, snake_case, camelCase, file paths, and acronyms."
+    capitalize_first: false
+    ensure_punctuation: false
+
+  # Other editors: copy only, so the user decides where text lands.
+  - match: ["cursor.exe", "windsurf.exe", "rider64.exe", "pycharm64.exe", "idea64.exe"]
+    auto_paste: false
+    initial_prompt: "Programming context. Identifiers, snake_case, camelCase, file paths, regex."
+
+  # Password managers: never deliver dictation into a password field.
+  - match: ["1password.exe", "1password-7.exe", "lastpass.exe", "bitwarden.exe", "keepass.exe", "keepassxc.exe"]
+    suppress: true
+
+  # Terminals (Claude Code / Codex CLI prompts): paste at the prompt, never ENTER.
+  - match: ["windowsterminal.exe", "wt.exe", "conhost.exe", "powershell.exe", "cmd.exe", "alacritty.exe", "wezterm-gui.exe"]
+    auto_paste: true
+    auto_send: false

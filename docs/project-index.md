@@ -58,6 +58,9 @@ Open-source fork of [PinW/whisper-key-local](https://github.com/PinW/whisper-key
 | **Whisper.cpp Backend** | `whisper_engine_cpp.py` | Opt-in `whisper_cpp` backend mirroring WhisperEngine's API | pywhispercpp |
 | **Foreground App** | `platform/*/foreground.py` | Detects the active window/app for per-app rules | pywin32 / pyobjc |
 | **Console Control** | `platform/windows/console.py` | Show/hide/own the console window (pyapp builds) | ctypes |
+| **App-Package Guard** | `platform/windows/app.py` | Detect a start inside an MSIX app (e.g. Codex) and relaunch via Explorer | ctypes |
+| **Local Config (this PC)** | `local-config/` + `tools/sync_local_config.py` | Canonical production settings, drift check, sync, app-package migration | ruamel.yaml |
+| **Windows Launcher** | `tools/windows-launcher/` + `tools/build-whisper-local-launcher.ps1` | Console-free `WhisperLocalLauncher.exe` for Start menu/taskbar | C# (csc) |
 
 ## Project Structure
 

@@ -27,8 +27,10 @@ Audio and speech recognition remain local. Only the completed text transcript is
 | Python environment | `C:\Dev\whisper-local\.venv` |
 | Visible/manual launcher | `C:\Dev\whisper-local\whisper-local-user.cmd` |
 | Background/restart launcher | `C:\Dev\whisper-local\whisper-local-autostart.vbs` |
+| Start-menu/taskbar launcher | `C:\Dev\whisper-local\WhisperLocalLauncher.exe` (Start menu entry `Whisper Local`; rebuild with `tools\build-whisper-local-launcher.ps1`) |
 | Windows login startup | HKCU `Run` value `WhisperLocal` -> `whisper-local-autostart.vbs` |
-| User settings | `%APPDATA%\whisperkey\user_settings.yaml` |
+| Canonical configuration | `C:\Dev\whisper-local\local-config\` (source of truth, in Git) |
+| Live configuration | `%APPDATA%\whisperkey\` (synced from `local-config\`) |
 | NTNU credential | Windows user environment variable `NTNU_LLM_API_KEY` |
 | Whisper model | `large-v3-turbo` |
 | Inference | NVIDIA CUDA, `float16` |
@@ -43,6 +45,90 @@ than a fixed device ID because Windows can renumber audio devices. If HyperX is 
 available, startup continues with the Windows default microphone and records a
 warning in `app.log`.
 
+`WhisperLocalLauncher.exe` does the same as `whisper-local-user.cmd`, but has no console
+window. Windows Search and the taskbar treat it as a normal app, which they don't do for a
+`.cmd` script. Ignore any `whisper-local-launcher.cmd` search result under
+`Documents\Codex\...`: that copy is obsolete.
+
+## Where the configuration lives (read this first)
+
+### One live folder: `%APPDATA%\whisperkey`
+
+Whisper Local reads `user_settings.yaml`, `app_rules.yaml` and `profiles.yaml` from this
+folder, and writes `app.log`, `transcripts.jsonl` and `stats.jsonl` to it.
+
+**Codex desktop sees a different folder at the same path.** Codex is a Microsoft Store
+(MSIX) app, so Windows redirects `%APPDATA%` for Codex and for every program Codex starts
+into Codex's private folder:
+
+```text
+%LOCALAPPDATA%\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Roaming\whisperkey
+```
+
+A Whisper Local started by Codex therefore ran on different settings, logs and history
+from one started by Explorer (login, Start menu). Agents reading "`%APPDATA%\whisperkey`"
+from Codex and from Claude Code saw different files and reported contradictory results.
+Since 2026-10-06:
+
+- Whisper Local detects a start from inside an app package and hands the start to
+  Explorer (`WhisperLocalLauncher.exe` or `whisper-local-autostart.vbs`), then exits.
+  The log and console say `Started inside app package ...; Relaunching via Explorer`.
+- `tools\sync_local_config.py --check` reports any `whisperkey` folder under
+  `%LOCALAPPDATA%\Packages\` as drift.
+- Agents restart Whisper Local only through Explorer:
+  `explorer.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"`.
+
+### `local-config\` is the source of truth
+
+The live files are only seeded from `src\whisper_key\*.defaults.yaml` when they're missing,
+and the app rewrites `user_settings.yaml` itself. Repo fixes to defaults never reach an
+existing install, and hand edits to the live files get lost. So:
+
+1. Change production settings in `local-config\` (`user_settings.yaml`, `app_rules.yaml`,
+   `profiles.yaml`) and commit.
+2. Apply them: `.venv\Scripts\python.exe tools\sync_local_config.py`. It backs up every
+   file it replaces to `%APPDATA%\whisperkey\backups\` and keeps live-only extras such as
+   a tray-chosen microphone ID.
+3. Restart Whisper Local (tray **Restart**, or the Start menu).
+4. Confirm: `.venv\Scripts\python.exe tools\sync_local_config.py --check` exits 0.
+
+To change a setting from the tray or settings window, also copy the change into
+`local-config\`, or `--check` will report it as drift.
+
+### Dictation logs
+
+| File | Contents | Use it for |
+|---|---|---|
+| `app.log` | Every pipeline step: hotkey, recording length, detected language, Whisper time, `OpenAI cleanup model=... elapsed ... outcome=... final=polished/raw` | Response times, which NTNU model ran, failures |
+| `transcripts.jsonl` | One entry per dictation: `raw_text` (local Whisper), `text` (delivered), `language`, `app`, duration | Whether cleanup changed the text |
+| `stats.jsonl` | Characters, duration and app per dictation (no model) | Usage statistics only |
+
+### Verify the real install (do not skip)
+
+Synthetic tests and a live PID aren't enough. After any configuration or startup change:
+
+1. `tools\sync_local_config.py --check` exits 0.
+2. The latest start in `%APPDATA%\whisperkey\app.log` shows `large-v3-turbo` and
+   `Selected preferred input device: Microphone (HyperX Quadcast)`.
+3. One messy English dictation produces an `OpenAI cleanup model=moonshotai/Kimi-K2.6-instant ... final=polished`
+   line, and its `transcripts.jsonl` entry has `text` different from `raw_text`.
+4. The text pastes into the foreground app.
+
+### Incident 2026-10-06: two configs, silently stripped routes
+
+- **Symptoms:** the `base` model and no NTNU cleanup when started at login or from the
+  Start menu, webcam instead of HyperX, terminal paste "fixed repeatedly" but coming back.
+  Codex reported cleanup working at the same time.
+- **Cause 1:** the Codex/MSIX `%APPDATA%` split described above. The production settings,
+  including the terminal-paste fix, lived only in Codex's private copy.
+- **Cause 2:** `config_manager` dropped `postprocess.openai_compatible.routes` and
+  `postprocess.corrections` whenever the app saved settings (tray microphone or model
+  change, profile apply, GPU onboarding), because their defaults are empty maps.
+- **Fixes:** routes and corrections are now kept on save (`EXTENSIBLE_PATHS`); the app
+  relaunches outside app packages; `local-config\` plus `tools\sync_local_config.py`; the
+  Codex copy's history was merged into the real `transcripts.jsonl`/`stats.jsonl` and the
+  folder retired as `whisperkey.migrated-<timestamp>`.
+
 ## Normal use
 
 Hold `Ctrl+Win`, dictate, and release the keys. Whisper transcribes locally and the language router applies the appropriate cleanup before pasting.
@@ -50,7 +136,7 @@ Hold `Ctrl+Win`, dictate, and release the keys. Whisper transcribes locally and 
 ### Starting and restarting on Windows
 
 - For a manual start with a visible diagnostic console, double-click `whisper-local-user.cmd`.
-- For startup, background launches, or restarts initiated by an automation/assistant, launch `whisper-local-autostart.vbs` with `wscript.exe`.
+- For startup, background launches, or restarts initiated by an automation/assistant, run `explorer.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"`. Going through Explorer keeps the app out of an agent's app-package container (see "Where the configuration lives"); a direct `wscript.exe` call from Codex would start inside it.
 - The `WhisperLocal` value in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` is the sole login-start mechanism. It launches the VBS wrapper from Explorer's interactive user session. The older `Whisper Local` value and Scheduled Task `\WhisperLocal` must remain absent.
 - Check the durable startup state with `powershell -ExecutionPolicy Bypass -File tools\repair-local-startup.ps1 -Check`. Run the same command without `-Check` to restore the exact Run value and remove the obsolete task and legacy Run value.
 - On 2026-09-16 and again on 2026-09-23, the Scheduled Task produced a Python process with CUDA and audio modules loaded, but current dictations did not reach the PID/log/history and simulated paste failed. Starting the same VBS launcher in the interactive session immediately restored transcription, language cleanup, and paste. This is why Task Scheduler is no longer used here.
@@ -101,7 +187,7 @@ No NTNU model is called. The local Whisper transcript is delivered unchanged apa
 | Transforms | Rewrite selected existing text using fixed prompts; currently require Ollama |
 | Profiles | Apply persistent groups of Whisper/clipboard settings; unrelated to automatic LLM cleanup |
 
-The tray normally displays the `Dictation` profile because `profiles.yaml` contains `active: dictation`. This installation customizes that profile to preserve `large-v3-turbo`, restrict language detection to English and Norwegian, and prefer English when detection is uncertain. The `Notes` profile still specifies the smaller `base` model and should not be selected for normal dictation.
+The tray normally displays the `Dictation` profile because `profiles.yaml` contains `active: dictation`. The canonical profiles live in `local-config\profiles.yaml`. The Dictation profile keeps `large-v3-turbo`, restricts language detection to English and Norwegian, and prefers English when detection is uncertain. The `Notes` profile still specifies the smaller `base` model and should not be selected for normal dictation.
 
 ## Privacy and disabling remote cleanup
 
@@ -127,6 +213,7 @@ From PowerShell:
 Set-Location C:\Dev\whisper-local
 & .\whisper-local-user.cmd --doctor
 & .\.venv\Scripts\python.exe -m unittest discover -s tests
+& .\.venv\Scripts\python.exe tools\sync_local_config.py --check
 git diff --check
 ```
 
@@ -147,7 +234,7 @@ The customization adds:
 - Configuration schema entries and regression tests for provider routing and fallback.
 - `whisper-local-user.cmd` for the project-local NVIDIA runtime DLLs.
 
-The user settings under `%APPDATA%` are deliberately outside Git. This repository contains the implementation and safe configuration schema, not the NTNU key or private transcript history.
+The production settings are versioned in `local-config\` (no secrets) and synced to `%APPDATA%\whisperkey`. The NTNU key and the private transcript history stay outside Git.
 
 ## Git and upstream updates
 
@@ -179,8 +266,8 @@ Do not push custom changes directly to the upstream repository. Use the personal
 - Bad cleanup behavior: set `postprocess.openai_compatible.enabled: false`.
 - App will not start: run `whisper-local-user.cmd --doctor` from a visible PowerShell window.
 - Deliberate silence is not a microphone fault. A normal silent test logs the hotkey press/release, about 0.5 seconds of retained pre-roll, and `VAD check: SILENCE`, with no transcript produced.
-- A dead continuous-audio stream can leave the Python process, tray icon, and hotkeys alive while Windows no longer shows the microphone-in-use icon. The verified 2026-09-11 signature was: a spoken attempt logged `Starting audio recording` and `Push-to-talk key released`, but no subsequent resampling, recorded-duration, VAD, or transcription entry. A silent recording being trimmed to the 0.5-second pre-roll is normal and does not establish this failure by itself. Confirm that the configured input device still exists, then restart through `wscript.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"` and verify one physical spoken `Ctrl+Win` dictation. The underlying event that stopped the PortAudio callback was not captured in the log; do not claim the user's deliberate silence caused it.
+- A dead continuous-audio stream can leave the Python process, tray icon, and hotkeys alive while Windows no longer shows the microphone-in-use icon. The verified 2026-09-11 signature was: a spoken attempt logged `Starting audio recording` and `Push-to-talk key released`, but no subsequent resampling, recorded-duration, VAD, or transcription entry. A silent recording being trimmed to the 0.5-second pre-roll is normal and does not establish this failure by itself. Confirm that the configured input device still exists, then restart through `explorer.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"` and verify one physical spoken `Ctrl+Win` dictation. The underlying event that stopped the PortAudio callback was not captured in the log; do not claim the user's deliberate silence caused it.
 - Repeated failure specifically after Windows login: run `tools\repair-local-startup.ps1 -Check`. The required state is one exact `WhisperLocal` registry Run value and no `\WhisperLocal` Scheduled Task. Before the 2026-09-14 mutex fix, duplicate launches leaked a mutex handle; later testing also showed Task Scheduler could create a fully loaded but non-functional process outside the effective interactive input path. A PID, GPU allocation, or tray icon alone does not prove that instance is healthy; `app.log` must contain a current initialization sequence and one physical dictation must paste successfully.
-- Configuration problem: compare `%APPDATA%\whisperkey\user_settings.yaml` with its local backup files before resetting anything.
+- Configuration problem: run `tools\sync_local_config.py --check`; repair with `tools\sync_local_config.py`. Earlier versions of each replaced file are in `%APPDATA%\whisperkey\backups\`.
 - Code regression after an upstream merge: return to the last known-good commit on `local/ntnu-polish`; do not use destructive Git reset commands while uncommitted work exists.
-- Unexpected `base` model or unrestricted language output: check both `user_settings.yaml` and the active profile in `profiles.yaml`. The local `Dictation` profile must preserve `large-v3-turbo`, `allowed_languages: [en, no]`, and `fallback_language: en`.
+- Unexpected `base` model, no cleanup, or the wrong microphone: run `tools\sync_local_config.py --check` first. It also catches a second config folder inside an app package (the 2026-10-06 incident). Then check the active profile in `profiles.yaml`. The local `Dictation` profile must preserve `large-v3-turbo`, `allowed_languages: [en, no]`, and `fallback_language: en`.
