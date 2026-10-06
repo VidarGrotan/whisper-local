@@ -1635,7 +1635,7 @@ class PostprocessHotReloadTests(unittest.TestCase):
                 cm = cm_mod.ConfigManager(quiet=True)
                 self.assertFalse(cm.get_postprocess_config().get('strip_filler_words'))
                 sp = os.path.join(d, 'user_settings.yaml')
-                base = cm._postprocess_mtime or os.path.getmtime(sp)
+                base = cm._live_reload_mtime or os.path.getmtime(sp)
                 with open(sp, 'w', encoding='utf-8') as f:
                     YAML().dump({'postprocess': {'strip_filler_words': True}}, f)
                 os.utime(sp, (base + 10, base + 10))  # guarantee a newer mtime

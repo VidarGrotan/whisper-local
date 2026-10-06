@@ -432,6 +432,8 @@ class StateManager:
             self.whisper_engine.initial_prompt = combined_prompt or None
             self.whisper_engine.language = None if language == 'auto' else language
             self.whisper_engine.task = task if task in ('transcribe', 'translate') else 'transcribe'
+            # Dictionary edits made while running apply from this dictation on.
+            self.whisper_engine.set_hotwords(self.config_manager.get_hotwords())
         except Exception as e:
             self.logger.debug(f"Engine context update failed: {e}")
 

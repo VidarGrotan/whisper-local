@@ -56,6 +56,10 @@ class WhisperEngineCpp:
 
         self._load_model()
 
+    # Mirrors WhisperEngine.set_hotwords so callers needn't know the backend.
+    def set_hotwords(self, hotwords):
+        self.hotwords = list(hotwords or [])
+
     def _load_model(self):
         print(f"🧠 Loading whisper.cpp model [{self.model_key}]...")
         print("   (Model files auto-download from ggerganov/whisper.cpp on first use)")

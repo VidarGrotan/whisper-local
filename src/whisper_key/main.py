@@ -371,6 +371,7 @@ def main():
     parser.add_argument('--import-vocab', metavar='PATH', help='Scan a folder for terms and merge into whisper.hotwords')
     parser.add_argument('--add-word', metavar='WORD', help='Add a word to your hotwords dictionary')
     parser.add_argument('--remove-word', metavar='WORD', help='Remove a word from your hotwords dictionary')
+    parser.add_argument('--add-word-dialog', action='store_true', help='Open the add-word window (used by the tray)')
     parser.add_argument('--list-dictionary', action='store_true', help='Show all words in your hotwords dictionary')
     parser.add_argument('--settings', action='store_true', help='Open the settings window')
     parser.add_argument('--history', action='store_true', help='Browse transcript history')
@@ -449,6 +450,16 @@ def main():
     if args.remove_word:
         from .dictionary import remove_word
         sys.exit(0 if remove_word(args.remove_word) else 1)
+
+    if args.add_word_dialog:
+        # Own process (see dictionary.show_add_word_dialog); log to app.log so a
+        # failed save is visible, since this window has no console.
+        logging.basicConfig(
+            filename=os.path.join(get_user_app_data_path(), 'app.log'), encoding='utf-8',
+            level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        from .dictionary import show_add_word_dialog
+        show_add_word_dialog()
+        sys.exit(0)
 
     if args.list_dictionary:
         from .dictionary import show_dictionary

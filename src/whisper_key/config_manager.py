@@ -109,11 +109,12 @@ class ConfigManager:
         
         self.config = self._load_config()
 
-        # Baseline mtime for postprocess hot-reload (see get_postprocess_config).
-        self._postprocess_mtime = None
+        # Baseline mtime for hot-reloading the live sections from disk
+        # (see _reload_live_sections_if_changed).
+        self._live_reload_mtime = None
         if self.use_user_settings:
             try:
-                self._postprocess_mtime = os.path.getmtime(self.user_settings_path)
+                self._live_reload_mtime = os.path.getmtime(self.user_settings_path)
             except OSError:
                 pass
 
@@ -338,19 +339,30 @@ class ConfigManager:
         # replacements, absorb, Ollama) apply on the NEXT dictation without an app
         # restart. Scoped to postprocess only — the one section read fresh per
         # delivery with no separately-cached consumer.
-        self._reload_postprocess_if_changed()
+        self._reload_live_sections_if_changed()
         return self.config.get('postprocess', {}).copy()
 
-    def _reload_postprocess_if_changed(self):
+    # Hotwords are written to disk by the add-word dialog, history window, CLI
+    # and vocab import while the app runs; read them fresh so a new word applies
+    # on the next dictation.
+    def get_hotwords(self) -> list:
+        self._reload_live_sections_if_changed()
+        return list(self.config.get('whisper', {}).get('hotwords') or [])
+
+    # Pull the sections other writers may change on disk (postprocess and
+    # whisper.hotwords) into memory when user_settings.yaml is newer than what
+    # we last saw. Also runs before every setting change, so a tray save can't write a
+    # stale in-memory copy over them.
+    def _reload_live_sections_if_changed(self):
         if not self.use_user_settings:
             return
         try:
             mtime = os.path.getmtime(self.user_settings_path)
         except OSError:
             return
-        if mtime == getattr(self, '_postprocess_mtime', None):
+        if mtime == getattr(self, '_live_reload_mtime', None):
             return
-        self._postprocess_mtime = mtime
+        self._live_reload_mtime = mtime
         try:
             default_config = self._load_default_config()
             yaml = YAML()
@@ -361,9 +373,12 @@ class ConfigManager:
             new_pp = resolved.get('postprocess')
             if new_pp is not None:
                 self.config['postprocess'] = new_pp
-                self.logger.debug("Reloaded postprocess config from disk")
+            new_hotwords = (resolved.get('whisper') or {}).get('hotwords')
+            if new_hotwords is not None and 'whisper' in self.config:
+                self.config['whisper']['hotwords'] = list(new_hotwords)
+            self.logger.debug("Reloaded postprocess and hotwords from disk")
         except Exception as e:
-            self.logger.debug(f"postprocess hot-reload failed: {e}")
+            self.logger.debug(f"Live settings hot-reload failed: {e}")
 
     def get_terminal_title_config(self) -> Dict[str, Any]:
         return self.config.get('terminal_title', {}).copy()
@@ -382,6 +397,10 @@ class ConfigManager:
         try:
             overrides = _compute_overrides(self.config, self._defaults_baseline)
             self._write_user_config(overrides)
+            try:
+                self._live_reload_mtime = os.path.getmtime(self.user_settings_path)
+            except OSError:
+                pass
             self.logger.info(f"User overrides saved to {self.user_settings_path}")
         except Exception as e:
             self.logger.error(f"Error saving user overrides to {self.user_settings_path}: {e}")
@@ -392,6 +411,10 @@ class ConfigManager:
 
     def update_user_setting(self, section: str, key: str, value: Any):
         try:
+            # Absorb on-disk edits (e.g. a just-added hotword) BEFORE applying
+            # this change, so the save below neither wipes them nor gets its own
+            # new value replaced by the reload.
+            self._reload_live_sections_if_changed()
             old_value = None
             if section in self.config and key in self.config[section]:
                 old_value = self.config[section][key]

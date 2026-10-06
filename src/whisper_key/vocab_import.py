@@ -9,9 +9,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
-from ruamel.yaml import YAML
-
-from .utils import get_user_app_data_path
 
 logger = logging.getLogger(__name__)
 
@@ -114,17 +111,8 @@ def _iter_files(root: Path) -> Iterable[Path]:
             continue
 
 
+# Append new terms through the dictionary's single writer, so the running app
+# and local-config/ see them too.
 def _merge_hotwords(words):
-    user_path = Path(get_user_app_data_path()) / 'user_settings.yaml'
-    yaml = YAML()
-    if user_path.exists():
-        with open(user_path, encoding='utf-8') as f:
-            data = yaml.load(f) or {}
-    else:
-        data = {}
-    whisper = data.setdefault('whisper', {})
-    current = list(whisper.get('hotwords') or [])
-    merged = list(dict.fromkeys(current + list(words)))
-    whisper['hotwords'] = merged
-    with open(user_path, 'w', encoding='utf-8') as f:
-        yaml.dump(data, f)
+    from .dictionary import list_hotwords, save_hotwords
+    save_hotwords(list(dict.fromkeys(list_hotwords() + list(words))))

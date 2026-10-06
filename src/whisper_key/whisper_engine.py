@@ -88,7 +88,7 @@ class WhisperEngine:
         self.fallback_language = fallback if fallback in self.allowed_languages else None
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
-        self.hotwords = ", ".join(hotwords) if hotwords else None
+        self.set_hotwords(hotwords)
         self.task = task if task in ('transcribe', 'translate') else 'transcribe'
         self.model = None
         self.last_detected_language = None
@@ -103,6 +103,11 @@ class WhisperEngine:
 
         self._load_model()
     
+    # faster-whisper takes hotwords as one comma-separated string. Called at
+    # startup and before each recording so dictionary edits apply live.
+    def set_hotwords(self, hotwords):
+        self.hotwords = ", ".join(hotwords) if hotwords else None
+
     def _get_model_source(self, model_key: str) -> str:
         if self.registry:
             return self.registry.get_source(model_key)

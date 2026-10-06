@@ -561,12 +561,18 @@ class SystemTray:
                 self.notify(f"Bundle failed: {e}")
         threading.Thread(target=work, daemon=True, name='bundle-logs').start()
 
+    # Separate process, no console: an in-process Tk window clashes with the
+    # level overlay's Tk thread and its buttons stop responding.
     def _open_add_word_dialog(self, icon=None, item=None):
+        import subprocess
+        import sys
         try:
-            from .dictionary import show_add_word_dialog
-            show_add_word_dialog()
+            subprocess.Popen(
+                [sys.executable, '-m', 'whisper_key.main', '--add-word-dialog'],
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+            )
         except Exception as e:
-            self.logger.error(f"Failed to show add-word dialog: {e}")
+            self.logger.error(f"Failed to open add-word dialog: {e}")
 
     def _open_transforms_file(self, icon=None, item=None):
         try:

@@ -3,10 +3,10 @@
 # toward, which is the cheapest way to fix recurring misrecognitions. Provides
 # CLI add/remove/list, a small Tk add-word dialog, and history mining that
 # suggests hotwords from words the user actually dictates. Writes
-# user_settings.yaml directly (round-trip YAML) so it works without a running app.
+# user_settings.yaml directly (round-trip YAML) so it works without a running app;
+# a running app picks the change up on its next dictation (ConfigManager reload).
 
 import logging
-import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -17,10 +17,10 @@ from .utils import get_user_app_data_path
 logger = logging.getLogger(__name__)
 USER_SETTINGS = "user_settings.yaml"
 
-# Singleton guard for the add-word dialog: re-invoking (tray click / repeated
-# CLI) raises the existing window instead of stacking new Tk roots + threads.
-_dialog_lock = threading.Lock()
-_dialog_root = None
+# A source checkout may carry its canonical production settings in
+# local-config/ (synced to the live file by tools/sync_local_config.py).
+# Hotword edits are mirrored there so a later sync doesn't revert them.
+LOCAL_CONFIG_SETTINGS = Path(__file__).resolve().parents[2] / "local-config" / USER_SETTINGS
 
 
 def list_hotwords() -> List[str]:
@@ -36,26 +36,53 @@ def list_hotwords() -> List[str]:
         return []
 
 
+# =============================================================================
+# Writing the hotword list (live settings + local-config mirror)
+# =============================================================================
+
+# Round-trip YAML matching the settings files' layout; a wide line limit keeps
+# long prompts on one line instead of re-wrapping them.
+def _settings_yaml() -> YAML:
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.width = 4096
+    yaml.indent(mapping=2, sequence=4, offset=2)
+    return yaml
+
+
+# Replace whisper.hotwords in one settings file, keeping everything else as-is.
+def _write_hotwords_to(path: Path, words: List[str]) -> None:
+    yaml = _settings_yaml()
+    data = {}
+    if path.exists():
+        with open(path, encoding='utf-8') as f:
+            data = yaml.load(f) or {}
+    data.setdefault('whisper', {})['hotwords'] = list(words)
+    with open(path, 'w', encoding='utf-8') as f:
+        yaml.dump(data, f)
+
+
+# Single writer for every hotword change (dialog, history window, CLI, vocab
+# import): the live settings file, plus local-config/ when this checkout has one.
+def save_hotwords(words: List[str]) -> None:
+    _write_hotwords_to(Path(get_user_app_data_path()) / USER_SETTINGS, words)
+    if LOCAL_CONFIG_SETTINGS.is_file():
+        try:
+            _write_hotwords_to(LOCAL_CONFIG_SETTINGS, words)
+        except Exception as e:
+            logger.warning(f"Could not mirror hotwords to {LOCAL_CONFIG_SETTINGS}: {e}")
+
+
 def add_word(word: str) -> bool:
     word = (word or '').strip()
     if not word:
         return False
-    user_path = Path(get_user_app_data_path()) / USER_SETTINGS
-    yaml = YAML()
-    if user_path.exists():
-        with open(user_path, encoding='utf-8') as f:
-            data = yaml.load(f) or {}
-    else:
-        data = {}
-    whisper = data.setdefault('whisper', {})
-    current = list(whisper.get('hotwords') or [])
+    current = list_hotwords()
     if word in current:
         print(f"   '{word}' already in dictionary")
         return False
     current.append(word)
-    whisper['hotwords'] = current
-    with open(user_path, 'w', encoding='utf-8') as f:
-        yaml.dump(data, f)
+    save_hotwords(current)
     print(f"   ✓ Added '{word}' to whisper.hotwords ({len(current)} total)")
     return True
 
@@ -64,22 +91,12 @@ def remove_word(word: str) -> bool:
     word = (word or '').strip()
     if not word:
         return False
-    user_path = Path(get_user_app_data_path()) / USER_SETTINGS
-    if not user_path.exists():
-        return False
-    yaml = YAML()
-    with open(user_path, encoding='utf-8') as f:
-        data = yaml.load(f) or {}
-    whisper = data.get('whisper') or {}
-    current = list(whisper.get('hotwords') or [])
+    current = list_hotwords()
     if word not in current:
         print(f"   '{word}' not found in dictionary")
         return False
     current.remove(word)
-    whisper['hotwords'] = current
-    data['whisper'] = whisper
-    with open(user_path, 'w', encoding='utf-8') as f:
-        yaml.dump(data, f)
+    save_hotwords(current)
     print(f"   ✓ Removed '{word}' from dictionary ({len(current)} left)")
     return True
 
@@ -159,23 +176,13 @@ def show_dictionary() -> int:
     return 0
 
 
-# Opens the small "add a hotword" dialog (tray item / CLI). Singleton-guarded:
-# re-invoking raises the existing window instead of stacking another Tk root and
-# thread. `on_added` lets the caller refresh live state (e.g. the running engine's
-# hotword list) once a word is actually saved.
-def show_add_word_dialog(on_added=None):
-    global _dialog_root
-    with _dialog_lock:
-        try:
-            if _dialog_root is not None and _dialog_root.winfo_exists():
-                _dialog_root.lift()
-                _dialog_root.focus_force()
-                return
-        except Exception:
-            pass
-
+# Shows the small "add a hotword" dialog and blocks until it closes. Runs in its
+# own process (`whisper-local --add-word-dialog`, launched from the tray): a Tk
+# window on a thread of the running app shares the process with the level
+# overlay's Tk thread, and its buttons silently stop working. The running app
+# picks up saved words from disk on its next dictation.
+def show_add_word_dialog():
     def run():
-        global _dialog_root
         try:
             import tkinter as tk
         except ImportError:
@@ -183,8 +190,6 @@ def show_add_word_dialog(on_added=None):
             return
         try:
             root = tk.Tk()
-            with _dialog_lock:
-                _dialog_root = root
             root.title("Whisper Local — Add Word")
             root.configure(bg='#0d1117')
             try:
@@ -233,20 +238,19 @@ def show_add_word_dialog(on_added=None):
                 if not word:
                     status_var.set("Type a word first.")
                     return
-                ok = add_word(word)
+                try:
+                    ok = add_word(word)
+                except Exception as e:
+                    logger.exception(f"Could not save hotword '{word}'")
+                    status_var.set(f"Could not save '{word}': {e}")
+                    return
                 if ok:
-                    status_var.set(f"Added '{word}'. Restart Whisper Local to apply.")
+                    status_var.set(f"Added '{word}'. Active from your next dictation.")
                     entry_var.set("")
-                    if on_added:
-                        try: on_added(word)
-                        except Exception: pass
                 else:
                     status_var.set(f"'{word}' is already in the dictionary.")
 
             def close(_=None):
-                global _dialog_root
-                with _dialog_lock:
-                    _dialog_root = None
                 try: root.destroy()
                 except Exception: pass
 
@@ -267,11 +271,11 @@ def show_add_word_dialog(on_added=None):
             root.protocol("WM_DELETE_WINDOW", close)
             root.bind('<Return>', commit)
             root.bind('<Escape>', close)
+            # Tk swallows handler errors to stderr, which is invisible here.
+            root.report_callback_exception = (
+                lambda *exc: logger.error("Add-word dialog error", exc_info=exc))
             root.mainloop()
         except Exception as e:
             logger.warning(f"Add-word dialog failed: {e}")
-        finally:
-            with _dialog_lock:
-                _dialog_root = None
 
-    threading.Thread(target=run, daemon=True, name='add-word-dialog').start()
+    run()
