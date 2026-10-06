@@ -12,7 +12,7 @@ Microphone audio
     -> language detection
        -> English: NTNU Kimi K2.6 Instant cleanup (two 2-second attempts)
           -> if both attempts fail: NTNU Qwen 3.8 27B fallback (one 3-second attempt)
-       -> Norwegian: NTNU Borealis 27B cleanup
+       -> Norwegian: NTNU Kimi K2.6 Instant cleanup (two 5-second attempts, then Qwen fallback)
        -> other/unknown: no remote cleanup
     -> clipboard paste at the active cursor
 ```
@@ -168,6 +168,12 @@ After an automated restart, do not treat a live PID or “Whisper Local ready”
 - Adds paragraphs or bullets only when structure materially improves readability.
 - Preserves intent, tone, uncertainty, technical terms, identifiers, commands, paths, URLs, and code.
 - Must edit the transcript, not answer or execute it.
+- Common-sense correction (since 2026-10-06, same rule as Norwegian): words or phrases
+  that make no sense are replaced by a *similar-sounding* alternative that fits, such as
+  "still low" → "still slow" or "pie test" → "PyTest". If nothing similar-sounding
+  fits, the original is kept. Before this change the prompt only corrected "when
+  context is strong", and it once turned the unknown word "chemimodell" into
+  "chemiluminescence". Names Whisper can't hear at all (Kimi) belong in hotwords.
 - If the cleanup model nevertheless returns an assistant-style reply or turns a
   short dictation into a substantially longer response, Whisper Local rejects
   that output and retries the same raw text once with a corrective system
@@ -178,10 +184,24 @@ After an automated restart, do not treat a live PID or “Whisper Local ready”
 
 ### Norwegian cleanup
 
-- Model: `NbAiLab/borealis-27b`
-- Normalizes dialectal Norwegian to Bokmål.
-- Removes fillers and accidental repetition and improves sentence structure.
-- Preserves English technical terminology and identifiers.
+- Model: `moonshotai/Kimi-K2.6-instant`. Two attempts of 5 seconds each, then
+  `Qwen/Qwen3.8-27B-FP8` once for 8 seconds; the raw transcript if all fail.
+  Norwegian dictations run longer than English prompts, hence the longer timeout.
+- Normalizes dialectal Norwegian to Bokmål, removes fillers and accidental
+  repetition, and improves sentence structure. Keeps English technical terms and identifiers.
+- **Common-sense correction:** the prompt tells the model to work out the topic first,
+  then replace words that make no sense with a *similar-sounding* word that fits. If no
+  such word fits clearly, it keeps the original word, and it must never substitute a
+  different idea.
+- **Why not Borealis (`NbAiLab/borealis-27b`, used until 2026-10-06):** on four real
+  dialect dictations it returned the text unchanged three times, invented a detail
+  once ("med utsikt over"), and took 2–7 seconds. Kimi Instant with the common-sense
+  prompt fixed elgjakt, Støren, Hølonda, Melhus, Grøtvatnet and "bukk, hind og kalv"
+  in about 1–2.5 seconds, with no invented content. GLM-5.3 Flash was about as accurate
+  but slow and erratic (6–22 seconds); NorwAI-Magistral and NorMistral-thinking leak
+  formatting or reasoning text into the output and are unusable.
+- **Limit:** when Whisper's word is too far from the real one (for example "gjort" for
+  "hjort"), cleanup can't recover it safely. Add such words as hotwords instead.
 
 ### Other languages
 
@@ -229,7 +249,7 @@ git diff --check
 Last verified after the interactive-login startup repair: 188 tests passed, with 4 platform-specific skips. Synthetic installed-configuration checks confirmed:
 
 - English selects `moonshotai/Kimi-K2.6-instant`.
-- Norwegian selects `NbAiLab/borealis-27b`.
+- Norwegian selects `moonshotai/Kimi-K2.6-instant` (Borealis until 2026-10-06).
 - An unconfigured language sends zero NTNU requests.
 - Both configured routes preserve the local transcript when the provider fails.
 

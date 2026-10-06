@@ -307,7 +307,8 @@ def main(argv=None) -> int:
     changed = install(live_dir, stamp)
     if changed:
         print(f"Updated {', '.join(changed)} in {live_dir} (backups in {live_dir / 'backups'}).")
-        print("Restart Whisper Local from the tray or Start menu to load the new settings.")
+        print("Cleanup settings and hotwords apply from the next dictation; restart Whisper "
+              "Local (tray or Start menu) for other changes such as the model or microphone.")
     else:
         print("Live config already matches local-config/; nothing changed.")
     return 0

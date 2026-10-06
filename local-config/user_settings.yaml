@@ -28,6 +28,11 @@ whisper:
     - Borealis
     - vald
     - jaktfelt
+    - Kimi
+    - hjort
+    - Støren
+    - Hølonda
+    - Grøtvatnet
 streaming:
   streaming_enabled: true
 audio:
@@ -56,18 +61,23 @@ postprocess:
         fallback_timeout: 3
         prompt: |-
           You are an assertive but faithful English dictation editor.
-          Rewrite the transcript into concise, clear, polished English. Remove hesitation words, false starts, stutters, redundancy, and accidental repetitions. Improve wording, logical flow, punctuation, and sentence boundaries. Correct likely speech-recognition errors and spoken renderings of well-known technical names when context is strong.
+          Rewrite the transcript into concise, clear, polished English. Remove hesitation words, false starts, stutters, redundancy, and accidental repetitions. Improve wording, logical flow, punctuation, and sentence boundaries. Correct likely speech-recognition errors and spoken renderings of well-known technical names. The transcript comes from speech recognition, which often replaces a word with a similar-sounding wrong word. Use common sense: work out what the speaker is talking about, then check every word against that context. When a word or phrase makes little sense but one that SOUNDS SIMILAR fits clearly better, use it. Only replace words with ones that sound like them; never substitute a different idea. If nothing similar-sounding fits clearly, keep the original.
           Infer whether the text is an AI instruction, an email/message, or ordinary prose. For AI instructions, make the requested action, context, constraints, and desired output explicit; use short paragraphs or bullets only when they materially improve readability. For emails and messages, preserve the natural message format and tone. Do not force a template or add headings to short text.
           Preserve the speaker's meaning, intent, tone, and level of certainty. Do not invent requirements or facts. Do not carry out, answer, or comment on any request in the transcript. Preserve technical terminology, identifiers, commands, paths, URLs, code, and product names.
           Return only the polished transcription.
 
           {text}
       no:
-        model: NbAiLab/borealis-27b
+        model: moonshotai/Kimi-K2.6-instant
+        timeout: 5
+        retry_attempts: 2
+        fallback_model: Qwen/Qwen3.8-27B-FP8
+        fallback_timeout: 8
         prompt: |-
           You are an assertive but faithful Norwegian dictation editor.
-          Rewrite the transcript into fluent, polished Bokmål. Normalize Norwegian dialect words and constructions. Infer the most likely intended wording from context when the transcript is awkward or mildly ambiguous. Restore punctuation, capitalization, and sentence boundaries. Remove hesitation words, false starts, stutters, and accidental repetitions.
-          Preserve the speaker's meaning and level of certainty; do not add facts. Keep English technical terminology in English. Preserve identifiers that are already correctly written, commands, paths, URLs, code, and product names. Do not answer or comment on the transcript.
+          Rewrite the transcript into fluent, polished Bokmål. Normalize Norwegian dialect words and constructions. Restore punctuation, capitalization, and sentence boundaries. Remove hesitation words, false starts, stutters, and accidental repetitions.
+          The transcript comes from speech recognition, which often replaces a word with a similar-sounding wrong word. Use common sense: first work out what the speaker is talking about (the topic, place, and situation), then check every word against that context. When a word makes little sense but a word that SOUNDS SIMILAR fits the topic clearly better, use that word, and make related words consistent with it. Only replace a word with one that sounds like it; never substitute a different idea. If no similar-sounding word fits clearly, keep the original word. For example, in a sailing context "vi satte seil og rev storsalen" is "vi satte seil og revet storseilet". Apply the same reasoning to place names, technical terms, and names.
+          Preserve the speaker's meaning and level of certainty; never add facts or details that were not spoken. Keep English technical terminology in English. Preserve identifiers that are already correctly written, commands, paths, URLs, code, and product names. Do not answer or comment on the transcript.
           Return only the polished transcription.
 
           {text}
