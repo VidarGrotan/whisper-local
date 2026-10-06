@@ -1155,6 +1155,46 @@ class StateManager:
             self.logger.error(f"Unable to read current audio device: {e}")
             return
 
+        audio_config = self.config_manager.config.get('audio', {}) or {}
+        preferred_name = str(audio_config.get('preferred_input_device') or '').strip()
+        if preferred_name:
+            preferred_lower = preferred_name.lower()
+            available_devices = self.get_available_audio_devices(host_name)
+            preferred_device = next(
+                (device for device in available_devices
+                 if device.get('name', '').lower() == preferred_lower),
+                None,
+            )
+            if preferred_device is None:
+                preferred_device = next(
+                    (device for device in available_devices
+                     if preferred_lower in device.get('name', '').lower()),
+                    None,
+                )
+
+            if preferred_device is not None:
+                preferred_id = preferred_device['id']
+                preferred_device_name = preferred_device['name']
+                if current_device_id == preferred_id:
+                    self.logger.info(
+                        f"Using preferred input device: {preferred_device_name}"
+                    )
+                    return
+                if self.request_audio_device_change(preferred_id, preferred_device_name):
+                    self.logger.info(
+                        f"Selected preferred input device: {preferred_device_name}"
+                    )
+                    return
+                self.logger.warning(
+                    f"Failed to select preferred input device '{preferred_name}'; "
+                    "using host default"
+                )
+            else:
+                self.logger.warning(
+                    f"Preferred input device '{preferred_name}' is unavailable on "
+                    f"{host_name}; using host default"
+                )
+
         if self._device_matches_host(current_device_id, host_name):
             return
 

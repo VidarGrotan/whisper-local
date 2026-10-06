@@ -260,6 +260,10 @@ audio: # Audio Recording Settings
     # Note: Device IDs are assigned by the operating system and may change if devices
     # are plugged/unplugged. Use system tray to select device - it will save the ID here.
     input_device: "default"
+    # Optional case-insensitive device-name preference. Resolved against the
+    # selected host API on every startup so Windows device-ID changes are safe.
+    # If unavailable, Whisper Local continues with the host's default input.
+    preferred_input_device: ""
 
     # Noise suppression (requires: pip install 'whisper-local[noise]')
     # Applies spectral gating via noisereduce before passing audio to Whisper.

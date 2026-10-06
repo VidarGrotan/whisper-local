@@ -33,8 +33,15 @@ Audio and speech recognition remain local. Only the completed text transcript is
 | Whisper model | `large-v3-turbo` |
 | Inference | NVIDIA CUDA, `float16` |
 | Recording | Push-to-talk |
+| Preferred microphone | `HyperX Quadcast` by name on Windows WASAPI; Windows default if unavailable |
 
 The launcher adds the CUDA, cuBLAS, and cuDNN DLL directories installed inside the virtual environment to `PATH`, then starts the editable Whisper Local installation.
+
+At every startup, Whisper Local enumerates Windows WASAPI inputs and selects the
+device whose name contains `HyperX Quadcast`. The preference is name-based rather
+than a fixed device ID because Windows can renumber audio devices. If HyperX is not
+available, startup continues with the Windows default microphone and records a
+warning in `app.log`.
 
 ## Normal use
 

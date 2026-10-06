@@ -1079,6 +1079,60 @@ class TranscriptLogTests(unittest.TestCase):
         self.assertEqual(len(entries), 0)
 
 
+class AudioDevicePreferenceTests(unittest.TestCase):
+    def test_startup_switches_to_preferred_device_by_name(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from whisper_key.state_manager import StateManager
+
+        manager = StateManager.__new__(StateManager)
+        manager.audio_recorder = SimpleNamespace(get_device_id=lambda: 21)
+        manager.config_manager = SimpleNamespace(config={
+            'audio': {'preferred_input_device': 'HyperX Quadcast'},
+        })
+        manager.logger = mock.Mock()
+        manager.get_available_audio_devices = mock.Mock(return_value=[
+            {'id': 20, 'name': 'Microphone (HyperX Quadcast)'},
+            {'id': 21, 'name': 'Microphone (Logitech Webcam C925e)'},
+        ])
+        manager.request_audio_device_change = mock.Mock(return_value=True)
+        manager._device_matches_host = mock.Mock(return_value=True)
+
+        manager._ensure_audio_device_for_host('Windows WASAPI')
+
+        manager.request_audio_device_change.assert_called_once_with(
+            20, 'Microphone (HyperX Quadcast)')
+
+    def test_startup_uses_host_default_when_preferred_device_is_absent(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from whisper_key.state_manager import StateManager
+
+        manager = StateManager.__new__(StateManager)
+        manager.audio_recorder = SimpleNamespace(get_device_id=lambda: 1)
+        manager.config_manager = SimpleNamespace(config={
+            'audio': {'preferred_input_device': 'HyperX Quadcast'},
+        })
+        manager.logger = mock.Mock()
+        manager.get_available_audio_devices = mock.Mock(return_value=[
+            {'id': 21, 'name': 'Microphone (Logitech Webcam C925e)'},
+        ])
+        manager.request_audio_device_change = mock.Mock(return_value=True)
+        manager._device_matches_host = mock.Mock(return_value=False)
+        manager._get_default_device_for_host = mock.Mock(return_value=21)
+        manager._get_device_name = mock.Mock(
+            return_value='Microphone (Logitech Webcam C925e)')
+
+        manager._ensure_audio_device_for_host('Windows WASAPI')
+
+        manager.request_audio_device_change.assert_called_once_with(
+            21, 'Microphone (Logitech Webcam C925e)')
+        self.assertTrue(any(
+            'HyperX Quadcast' in str(call)
+            for call in manager.logger.warning.call_args_list
+        ))
+
+
 class TranscriptPipelineHistoryTests(unittest.TestCase):
     def test_pipeline_saves_raw_and_polished_text_with_language(self):
         import collections
