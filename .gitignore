@@ -143,3 +143,6 @@ start_whisper_local.vbs
 brain/
 STARTER-PROMPT.md
 VERIFY.md
+
+# Built locally by tools/build-whisper-local-launcher.ps1
+/WhisperLocalLauncher.exe
