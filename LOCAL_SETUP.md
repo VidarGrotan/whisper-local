@@ -207,6 +207,52 @@ After an automated restart, do not treat a live PID or “Whisper Local ready”
 
 No NTNU model is called. The local Whisper transcript is delivered unchanged apart from deterministic local formatting configured by Whisper Local.
 
+## Dictionary (hotwords)
+
+Hotwords bias Whisper toward words it would otherwise mishear: names, places, jargon
+(currently e.g. Kimi, Borealis, hjort, Støren, Hølonda, Grøtvatnet, jaktfelt, vald).
+
+- **Add:** tray → **Add word to dictionary...**, or `whisper-local --add-word WORD`.
+  Remove with `--remove-word`, list with `--list-dictionary`.
+- **Takes effect** from the next dictation, with no restart. The running app re-reads the list
+  before each recording, and a later tray save doesn't overwrite it.
+- **Kept by the sync:** every add or remove also updates `local-config\user_settings.yaml`,
+  so `sync_local_config.py` keeps the word. Commit that file now and then.
+- **Hotword or prompt change?** A hotword fixes a *recurring* word at the source, before
+  any cleanup has to guess. The cleanup prompt can only repair words that sound similar
+  to something that fits. Once Whisper writes a plausible wrong word ("gjort" for
+  "hjort"), cleanup can't safely detect it. For recurring mistakes, add a hotword first.
+- The add-word window runs as its own process (`--add-word-dialog`). When it ran inside the
+  app beside the level overlay's window, its **Add** button silently did nothing.
+
+## Decisions (2026-10-06): don't redo these without new evidence
+
+These were tested on Vidar's own dictations. Reopen them only if something material
+changes, such as a new model, a different microphone or a different use.
+
+- **Usage pattern:** about 98 % of dictation goes into Claude Code or other LLM prompts,
+  and Vidar reads the text before pressing Enter. The reader is usually an LLM, which
+  ignores repetition easily but can't recover content that cleanup dropped.
+- **Whisper model: `large-v3-turbo`, not NB-Whisper.** NbAiLab's `nb-whisper-large` (official
+  CT2 build) wrote better Bokmål on two dialect clips, but **dropped a whole sentence**
+  (it is partly trained on condensed subtitles). It was 2.2× slower in 8-bit (2.4 s
+  against 1.1 s per clip) and 14× slower in float16. Turbo, with cleanup afterwards, is
+  faster and never loses content.
+- **Norwegian cleanup: Kimi K2.6 Instant, not Borealis.** See "Norwegian cleanup" above.
+- **Cleanup level: faithful, not condensed.** Cleanup tidies wording and removes filler but
+  keeps every point. Harder condensing was considered and rejected: some repetition
+  costs an LLM reader nothing, while a dropped point gets silently lost.
+- **Prompt changes only for patterns.** Don't tune the prompts after single mistakes, because
+  each extra rule risks side effects elsewhere. Prefer hotwords. If the prompts ever need
+  a change, make cleanup *more careful* about replacing words (a confident wrong fix
+  such as "imidlertid" → "i mellomtiden" is invisible to the reader), not more aggressive.
+- **Noise reduction: off.** Whisper is robust to ordinary room noise, and the HyperX gives
+  clean audio. The spectral-gating denoiser (`audio.noise_suppression`) adds artifacts
+  that tend to make Whisper *worse*. Its `noisereduce` library isn't even installed, so
+  enabling it would silently do nothing.
+- **Markdown in cleanup output is fine.** Kimi sometimes italicises Norwegian words inside
+  English text (`*jaktfelt*`); that's welcome, because it marks them as special.
+
 ## Other hotkeys and tray features
 
 | Feature | Current behavior |
@@ -246,7 +292,7 @@ Set-Location C:\Dev\whisper-local
 git diff --check
 ```
 
-Last verified after the interactive-login startup repair: 188 tests passed, with 4 platform-specific skips. Synthetic installed-configuration checks confirmed:
+Last verified on 2026-10-06 after the Kimi Norwegian switch: 223 tests passed, with 4 platform-specific skips, plus real English and Norwegian dictations through the live install. Synthetic installed-configuration checks confirmed:
 
 - English selects `moonshotai/Kimi-K2.6-instant`.
 - Norwegian selects `moonshotai/Kimi-K2.6-instant` (Borealis until 2026-10-06).
@@ -264,6 +310,21 @@ The customization adds:
 - `whisper-local-user.cmd` for the project-local NVIDIA runtime DLLs.
 
 The production settings are versioned in `local-config\` (no secrets) and synced to `%APPDATA%\whisperkey`. The NTNU key and the private transcript history stay outside Git.
+
+### Known risk: Tk windows inside the app process
+
+The level overlay runs its own Tk window on a thread of the app. A second Tk window
+opened on another thread of the **same process** can stop responding: the add-word
+dialog's **Add** button silently did nothing until it moved to its own process on
+2026-10-06. Settings, History and the add-word dialog now run as separate processes.
+These still open inside the app and **may** have the same problem (unverified):
+
+- the hotkey **cheat sheet** (tray),
+- the **fallback capture window** (shown when no text field is focused),
+- the **first-run welcome** window.
+
+If one of them has unresponsive buttons, move it to its own process in the same way
+(`main.py` flag plus `subprocess.Popen` from the tray; see `--add-word-dialog`).
 
 ## Git and upstream updates
 
@@ -294,6 +355,10 @@ Do not push custom changes directly to the upstream repository. Use the personal
 - NTNU unavailable: local transcripts are delivered automatically.
 - Bad cleanup behavior: set `postprocess.openai_compatible.enabled: false`.
 - App will not start: run `whisper-local-user.cmd --doctor` from a visible PowerShell window.
+- `Audio stream lost (... PaErrorCode -9999 ...); recovering to default device` right after a
+  start or restart has been seen twice (2026-10-06) and was harmless: the next
+  dictations recorded normally from the HyperX. It only matters if dictations then fail
+  or come from the wrong mic; in that case re-select the mic in the tray, or restart.
 - Deliberate silence is not a microphone fault. A normal silent test logs the hotkey press/release, about 0.5 seconds of retained pre-roll, and `VAD check: SILENCE`, with no transcript produced.
 - A dead continuous-audio stream can leave the Python process, tray icon, and hotkeys alive while Windows no longer shows the microphone-in-use icon. The verified 2026-09-11 signature was: a spoken attempt logged `Starting audio recording` and `Push-to-talk key released`, but no subsequent resampling, recorded-duration, VAD, or transcription entry. A silent recording being trimmed to the 0.5-second pre-roll is normal and does not establish this failure by itself. Confirm that the configured input device still exists, then restart through `explorer.exe "C:\Dev\whisper-local\whisper-local-autostart.vbs"` and verify one physical spoken `Ctrl+Win` dictation. The underlying event that stopped the PortAudio callback was not captured in the log; do not claim the user's deliberate silence caused it.
 - Repeated failure specifically after Windows login: run `tools\sync_local_config.py --check` and `tools\repair-local-startup.ps1 -Check` from a normal terminal (never from Codex, whose registry view is private). The required state is one exact `WhisperLocal` registry Run value and no `\WhisperLocal` Scheduled Task. Before the 2026-09-14 mutex fix, duplicate launches leaked a mutex handle; later testing also showed Task Scheduler could create a fully loaded but non-functional process outside the effective interactive input path. A PID, GPU allocation, or tray icon alone does not prove that instance is healthy; `app.log` must contain a current initialization sequence and one physical dictation must paste successfully.
