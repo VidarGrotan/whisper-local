@@ -12,8 +12,7 @@ whisper:
     - en
     - no
   fallback_language: en
-  initial_prompt: English and Norwegian technical dictation for software 
-    development.
+  initial_prompt: English and Norwegian technical dictation for software development.
   hotwords:
     - Claude
     - Claude Code
@@ -26,6 +25,9 @@ whisper:
     - FastAPI
     - Pydantic
     - PydanticAI
+    - Borealis
+    - vald
+    - jaktfelt
 streaming:
   streaming_enabled: true
 audio:
