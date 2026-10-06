@@ -1504,7 +1504,9 @@ class CorrectionsTests(unittest.TestCase):
     def _with_temp_settings(self):
         import tempfile
         import unittest.mock as mock
+        import shutil
         d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         from whisper_key import corrections as cmod
         patcher = mock.patch.object(cmod, 'get_user_app_data_path', return_value=d)
         patcher.start()
