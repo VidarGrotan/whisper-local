@@ -696,6 +696,41 @@ class TextPostprocessTests(unittest.TestCase):
         self.assertEqual(provider['routes']['no']['model'],
                          'NbAiLab/borealis-27b')
 
+    def test_settings_save_keeps_language_routes_and_corrections(self):
+        # Break caught: routes/corrections default to {}, so any app-side save
+        # (tray mic change, profile apply) silently deleted the NTNU routes.
+        import tempfile
+        from unittest import mock
+        from ruamel.yaml import YAML
+        from whisper_key.config_manager import ConfigManager
+
+        defaults = ROOT / 'src' / 'whisper_key' / 'config.defaults.yaml'
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / 'user_settings.yaml'
+            settings_path.write_text(
+                "postprocess:\n"
+                "  corrections:\n"
+                "    CTranslate2: [see translate two]\n"
+                "  openai_compatible:\n"
+                "    enabled: true\n"
+                "    routes:\n"
+                "      en: {model: moonshotai/Kimi-K2.6-instant}\n"
+                "      no: {model: NbAiLab/borealis-27b}\n",
+                encoding='utf-8')
+            with mock.patch('whisper_key.config_manager.get_user_app_data_path',
+                            return_value=directory):
+                config = ConfigManager(config_path=str(defaults), quiet=True)
+                config.update_user_setting('audio', 'preferred_input_device', 'HyperX Quadcast')
+
+            saved = YAML().load(settings_path.read_text(encoding='utf-8'))
+
+        self.assertEqual(saved['audio']['preferred_input_device'], 'HyperX Quadcast')
+        routes = saved['postprocess']['openai_compatible']['routes']
+        self.assertEqual(routes['en']['model'], 'moonshotai/Kimi-K2.6-instant')
+        self.assertEqual(routes['no']['model'], 'NbAiLab/borealis-27b')
+        self.assertEqual(list(saved['postprocess']['corrections']['CTranslate2']),
+                         ['see translate two'])
+
     # --- Post-transcription replacements (correction-learning backing store) ---
     def test_replacement_literal_whole_word(self):
         from whisper_key.text_postprocess import postprocess

@@ -31,7 +31,14 @@ def _build_settings_header():
         "\n"
     )
 
-EXTENSIBLE_PATHS = {'whisper.models', 'streaming.models'}
+# User-keyed maps whose defaults are empty or partial. Their children must
+# survive load-pruning and override saves, or a tray change wipes them.
+EXTENSIBLE_PATHS = {
+    'whisper.models',
+    'streaming.models',
+    'postprocess.corrections',
+    'postprocess.openai_compatible.routes',
+}
 
 def deep_merge_config(default_config: Dict[str, Any],
                       user_config: Dict[str, Any]) -> Dict[str, Any]:
